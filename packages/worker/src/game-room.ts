@@ -1,18 +1,37 @@
 /**
- * GameRoom Durable Object — one per FBG game code.
+ * GameRoom Durable Object — server-authoritative FBG room.
  *
- * Session 1 behavior: dumb relay between the two connected WebSockets.
- * First client to connect is the host; second is the remote. Messages
- * from one are forwarded verbatim to the other (matching v5.1's
- * Pusher message-passing flow).
+ * The canonical GameState lives here. Clients send actions; the DO runs
+ * `engine.reduce` and broadcasts the new state + events to everyone in
+ * the room. Random numbers come from a seeded RNG whose seed is
+ * persisted with the state, so the game is fully replayable from the
+ * action log.
  *
- * Session 2 seed (already scaffolded): the DO keeps GameState in
- * storage and can run engine.reduce() against it. Not wired to the
- * client protocol yet — the scaffolding is here so layering server
- * authority on top is a protocol change, not an infrastructure change.
+ * Protocol:
+ *   S -> C  { type: "welcome", role: "host" | "remote" }
+ *   S -> C  { type: "peer-joined" }              sent to host on 2nd connect
+ *   S -> C  { type: "peer-disconnected" }
+ *
+ *   Legacy relay (still supported so v5.1 client works during the
+ *   rewire):
+ *     C -> S  { type: "relay", payload }
+ *     S -> C  { type: "relay", payload }
+ *
+ *   Server-authoritative (new):
+ *     C -> S  { type: "init",   setup: {...} }   start a game
+ *     C -> S  { type: "action", action }         dispatch
+ *     S -> C  { type: "state",  state, events }  broadcast new state
+ *     S -> C  { type: "error",  reason }
  */
 
-import type { GameState, Action, Event as GameEvent } from "@fbg/engine";
+import {
+  reduce,
+  initialState,
+  seededRng,
+  type Action,
+  type Event as GameEvent,
+  type GameState,
+} from "@fbg/engine";
 
 type Role = "host" | "remote";
 
@@ -20,28 +39,33 @@ interface WsMeta {
   role: Role;
 }
 
+interface PersistedGame {
+  state: GameState;
+  seed: number;
+  /** Append-only log of actions applied, for replay / audit. */
+  actions: Action[];
+}
+
 export class GameRoom implements DurableObject {
   private state: DurableObjectState;
-  // Mirror of state.getWebSockets() with attached metadata. The metadata
-  // also lives in WebSocket.serializeAttachment so it survives hibernation.
   private meta = new WeakMap<WebSocket, WsMeta>();
 
-  // Session 2 scaffolding. Not authoritative yet.
-  private engineState: GameState | null = null;
+  // Authoritative game state — hydrated lazily from storage.
+  private game: PersistedGame | null = null;
+  private gameLoaded = false;
 
   constructor(state: DurableObjectState) {
     this.state = state;
 
-    // Restore metadata for any WebSockets that survived hibernation.
     for (const ws of state.getWebSockets()) {
       const attached = ws.deserializeAttachment() as WsMeta | null;
       if (attached) this.meta.set(ws, attached);
     }
 
-    // Restore engineState if it was persisted.
     state.blockConcurrencyWhile(async () => {
-      const stored = await state.storage.get<GameState>("engineState");
-      if (stored) this.engineState = stored;
+      const stored = await state.storage.get<PersistedGame>("game");
+      if (stored) this.game = stored;
+      this.gameLoaded = true;
     });
   }
 
@@ -61,26 +85,31 @@ export class GameRoom implements DurableObject {
     const client = pair[0];
     const server = pair[1];
 
-    // Hibernation-mode: the DO framework routes messages/close to our
-    // webSocketMessage / webSocketClose handlers without keeping the DO
-    // in memory between events.
     this.state.acceptWebSocket(server);
     const meta: WsMeta = { role };
     server.serializeAttachment(meta);
     this.meta.set(server, meta);
 
-    // Inform this client of its role (host = first in, remote = second).
     server.send(JSON.stringify({ type: "welcome", role }));
 
-    // If this is the second connection, notify the host.
     if (role === "remote") {
       this.broadcastExcept(server, { type: "peer-joined" });
+      // Catch the remote up on current state if the host already started a game.
+      if (this.game) {
+        server.send(JSON.stringify({ type: "state", state: this.game.state, events: [] }));
+      }
     }
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    if (!this.gameLoaded) {
+      // blockConcurrencyWhile in constructor should guarantee this, but
+      // defensive: wait a tick if somehow hit.
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
     let msg: unknown;
     try {
       msg = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw));
@@ -89,44 +118,98 @@ export class GameRoom implements DurableObject {
     }
     if (!msg || typeof msg !== "object") return;
 
-    const m = msg as { type?: string; payload?: unknown; action?: Action };
+    const m = msg as {
+      type?: string;
+      payload?: unknown;
+      action?: Action;
+      setup?: InitSetup;
+    };
 
     if (m.type === "relay") {
-      // Session 1: forward payload verbatim to the peer.
       this.broadcastExcept(ws, { type: "relay", payload: m.payload });
       return;
     }
 
+    if (m.type === "init") {
+      await this.handleInit(ws, m.setup);
+      return;
+    }
+
     if (m.type === "action" && m.action) {
-      // Session 2: run the action through the engine, broadcast events.
-      // Not yet: the client still sends relay messages. Scaffolding only.
-      const events = await this.applyAction(m.action);
-      this.broadcast({ type: "events", events });
+      await this.handleAction(ws, m.action);
       return;
     }
   }
 
-  async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
+  async webSocketClose(ws: WebSocket): Promise<void> {
     this.meta.delete(ws);
     this.broadcastExcept(ws, { type: "peer-disconnected" });
   }
 
-  async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+  async webSocketError(ws: WebSocket): Promise<void> {
     this.meta.delete(ws);
     this.broadcastExcept(ws, { type: "peer-disconnected" });
   }
 
-  // ---------- session 2 scaffolding ----------
+  // ---------- server-authoritative handlers ----------
 
-  private async applyAction(_action: Action): Promise<GameEvent[]> {
-    // TODO (session 2): load engine.reduce, apply, persist, return events.
-    // For now: no-op so the message doesn't error. When the client side
-    // switches to `{ type: "action" }` messages, this will be the only
-    // file that needs a real body.
-    return [];
+  private async handleInit(ws: WebSocket, setup: InitSetup | undefined): Promise<void> {
+    if (!setup || typeof setup !== "object") {
+      this.sendError(ws, "init: missing setup");
+      return;
+    }
+    if (this.game) {
+      // Game already in flight — return current state instead of erroring.
+      ws.send(JSON.stringify({ type: "state", state: this.game.state, events: [] }));
+      return;
+    }
+
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    const state = initialState({
+      team1: { id: String(setup.team1 ?? "?") },
+      team2: { id: String(setup.team2 ?? "?") },
+      quarterLengthMinutes: Number(setup.quarterLengthMinutes ?? 7),
+    });
+
+    this.game = { state, seed, actions: [] };
+    await this.state.storage.put("game", this.game);
+
+    this.broadcast({ type: "state", state, events: [] });
+  }
+
+  private async handleAction(ws: WebSocket, action: Action): Promise<void> {
+    if (!this.game) {
+      this.sendError(ws, "action before init");
+      return;
+    }
+
+    // The seeded RNG is reconstructed per-reduce from the base seed plus the
+    // action index, so each action draws from a different deterministic
+    // stream while the WHOLE game remains replayable from (seed, actions).
+    const rng = seededRng((this.game.seed + this.game.actions.length) >>> 0);
+
+    let result;
+    try {
+      result = reduce(this.game.state, action, rng);
+    } catch (err) {
+      this.sendError(ws, "reduce threw: " + (err as Error).message);
+      return;
+    }
+
+    this.game.state = result.state;
+    this.game.actions.push(action);
+    await this.state.storage.put("game", this.game);
+
+    this.broadcast({ type: "state", state: result.state, events: result.events });
   }
 
   // ---------- helpers ----------
+
+  private sendError(ws: WebSocket, reason: string): void {
+    try {
+      ws.send(JSON.stringify({ type: "error", reason }));
+    } catch {}
+  }
 
   private broadcast(msg: unknown): void {
     const data = JSON.stringify(msg);
@@ -143,3 +226,13 @@ export class GameRoom implements DurableObject {
     }
   }
 }
+
+interface InitSetup {
+  team1: string;
+  team2: string;
+  quarterLengthMinutes?: number;
+}
+
+// Re-export engine types for the client bundle — handy for typing the
+// protocol on the client side once the v5.1 rewire happens next session.
+export type { Action, GameEvent, GameState };
