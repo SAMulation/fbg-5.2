@@ -92,7 +92,33 @@ After first deploy, subsequent `git push` → `npm run deploy` from CI
   drives INIT + START_GAME + COIN_TOSS_CALL, asserts both clients
   receive identical state. Passes.
 
-## Session 2 step 2 (next): client rewire
+## Session 2 step 2 (in progress): client rewire
+
+**Done:**
+- `init` + `START_GAME` dispatched after v5.1's handshake.
+- `COIN_TOSS_CALL` replaces `Utils.coinFlip` in `coinToss()`.
+- `RECEIVE_CHOICE` dispatched after kick/receive UI.
+- **Kickoff** (`RESOLVE_KICKOFF`): `run.kickoff` branches to
+  `_serverKickoff` in online-multi mode. v5.1's kickPage/returnPage/
+  kickDec flow is bypassed; the DO computes and we apply field state
+  back to `game.spot` / `offNum` / etc.
+- **Regular plays** (`PICK_PLAY`): `playMechanism` branches to
+  `_serverPlayCycle`, which dispatches the local player's pick and
+  drains state broadcasts until `PLAY_RESOLVED` arrives. Both
+  clients' game.players[*].currentPlay populated from
+  `PLAY_CALLED` events.
+
+**Known gaps (next slices):**
+- Picking **FG / PUNT / PT (2pt)** from the play buttons isn't
+  routed — needs `FOURTH_DOWN_CHOICE` and `PAT_CHOICE` dispatches.
+  For now the `_serverPlayCycle` loop hangs on those picks.
+- **Clock ticking + quarter transitions** still run client-side
+  only. Server's `clock.quarter` gradually diverges. Needs
+  `TICK_CLOCK` dispatches.
+- **Timeout handling** — `CALL_TIMEOUT` not wired.
+- **Overtime** — not yet tested through the server path.
+
+## Older step 2 plan (preserved for context)
 
 The DO is now waiting to serve actions. The remaining work is on the
 browser side.
