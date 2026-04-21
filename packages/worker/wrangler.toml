@@ -4,6 +4,11 @@ main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
+# Pin the Cloudflare account so CI (non-interactive) can pick when the
+# token happens to have access to more than one account. This ID is not
+# a secret — it's in every wrangler log — so hardcoding is fine.
+account_id = "11a15d968a6aefccfcd9e6dabb7be231"
+
 # One Durable Object class per game room.
 [[durable_objects.bindings]]
 name = "GAME_ROOM"
