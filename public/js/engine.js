@@ -1381,6 +1381,8 @@ export {
   MATCHUP,
   MULTI,
   computeYardage,
+  drawMultiplier,
+  drawYards,
   emptyHand,
   emptyStats,
   endOvertimePossession,

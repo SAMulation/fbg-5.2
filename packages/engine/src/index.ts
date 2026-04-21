@@ -38,6 +38,7 @@ export { type Rng, seededRng } from "./rng.js";
 
 export { matchupQuality, MATCHUP, MULTI } from "./rules/matchup.js";
 export { computeYardage, type YardageInputs, type YardageOutcome } from "./rules/yardage.js";
+export { drawMultiplier, drawYards } from "./rules/deck.js";
 export {
   startOvertime,
   startOvertimePossession,

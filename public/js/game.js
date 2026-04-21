@@ -6,9 +6,15 @@ import Utils from './remoteUtils.js'
 import { CHANGE, INIT, INIT_OTC } from './defaults.js'
 import PromptInput from './promptInput.js'
 import FormInput from './formInput.js'
-// Engine: card-deck primitives. v5.1's deck-draw logic remains async to
-// preserve multiplayer RNG sync, but initial deck state comes from here.
-import { freshDeckMultipliers as engineFreshMults, freshDeckYards as engineFreshYards } from './engine.js'
+// Engine: card-deck primitives. The async wrapper around Utils.randInt is
+// preserved so multiplayer RNG-sync continues to work; the deck-state math
+// itself is delegated to the engine via a one-shot replay-rng adapter.
+import {
+  freshDeckMultipliers as engineFreshMults,
+  freshDeckYards as engineFreshYards,
+  drawMultiplier as engineDrawMultiplier,
+  drawYards as engineDrawYards
+} from './engine.js'
 
 export default class Game {
   constructor (resume = null, connection = null, team1 = null, team2 = null, numberPlayers = 1, gameType = 'reg', home = 1, qtrLength = 7, animation = true, stats1 = null, stats2 = null, input = new ButtonInput(), mults = null, yards = null) {
@@ -216,70 +222,40 @@ export default class Game {
     this.mults = engineFreshMults()
   }
 
-  async decMults (p = null) {
-    let card = -1
-
-    while (card === -1) {
-      card = await Utils.randInt(0, 3, this, p)
-
-      // Out of this card, try again
-      if (!this.mults[card]) {
-        card = -1
-      } else {
-        this.mults[card]--
-
-        // Check if mults is empty
-        if (this.mults[card] <= 0) {
-          let refill = true
-          // Check to see if the plays array is empty
-          this.mults.forEach(mult => {
-            if (mult > 0) {
-              refill = false
-            }
-          })
-
-          if (refill) {
-            this.fillMults()
-          }
-        }
-      }
+  // Pre-fetches random indices async (so multiplayer Pusher-RNG sync still
+  // works), then replays them through the pure engine for the actual deck
+  // arithmetic + reshuffle. The engine is the single source of truth for the
+  // result; v5.1 just owns the random source.
+  // Pre-fetches random indices async (so multiplayer Pusher-RNG sync still
+  // works — the `p` arg routes the draw through the right player), then
+  // replays them through the pure engine for the actual deck arithmetic +
+  // reshuffle. The engine is the source of truth for the result.
+  async _drawWithReplay (deckKey, randomMax, drawFn, p) {
+    const indices = []
+    while (true) {
+      const i = await Utils.randInt(0, randomMax, this, p)
+      indices.push(i)
+      if (this[deckKey][i] > 0) break
     }
+    const replayRng = {
+      intBetween: () => indices.shift() ?? 0,
+      coinFlip: () => 'heads',
+      d6: () => 1
+    }
+    const result = drawFn({ multipliers: this.mults, yards: this.yards }, replayRng)
+    this.mults = result.deck.multipliers
+    this.yards = result.deck.yards
+    return result
+  }
 
-    // LATER: Clean up how multiplier cards are represented
-    const cards = ['King', 'Queen', 'Jack', '10']
-
-    return { card: cards[card], num: card + 1 }
+  async decMults (p = null) {
+    const result = await this._drawWithReplay('mults', 3, engineDrawMultiplier, p)
+    return { card: result.card, num: result.index + 1 }
   }
 
   async decYards (p = null) {
-    let card = -1
-
-    while (card === -1) {
-      card = await Utils.randInt(0, 9, this, p)
-
-      if (!this.yards[card]) {
-        card = -1
-      } else {
-        this.yards[card]--
-
-        // Check if yards is empty
-        if (this.yards[card] <= 0) {
-          let refill = true
-          // Check to see if the plays array is empty
-          this.yards.forEach(yard => {
-            if (yard > 0) {
-              refill = false
-            }
-          })
-
-          if (refill) {
-            this.fillYards()
-          }
-        }
-      }
-    }
-
-    return card + 1
+    const result = await this._drawWithReplay('yards', 9, engineDrawYards, p)
+    return result.card
   }
 
   fillYards () {
