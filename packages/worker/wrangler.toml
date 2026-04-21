@@ -1,0 +1,25 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "fbg-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# One Durable Object class per game room.
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoom"
+
+# DO classes need a migration tag the first time they're deployed.
+[[migrations]]
+tag = "v1"
+new_classes = ["GameRoom"]
+
+# Serve the FBG static client from ../../public on the same domain. Single
+# origin means the client WebSocket URL is just wss://<worker-host>/api/ws.
+[assets]
+directory = "../../public"
+binding = "ASSETS"
+
+# Local dev defaults: wrangler dev serves on 8787 by default.
+[dev]
+port = 8787

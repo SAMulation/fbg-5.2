@@ -2,6 +2,12 @@ node_modules/
 message.html
 functions/
 .env
-# Local Netlify folder
+# Local Netlify folder (retired — see packages/worker for Cloudflare)
 .netlify
 public/js/config.js
+
+# Engine TS build output (consumers import from src/ or the esbuild bundle)
+packages/engine/dist/
+
+# Wrangler local state
+packages/worker/.wrangler/
