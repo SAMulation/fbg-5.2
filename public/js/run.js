@@ -197,17 +197,21 @@ export default class Run {
   }
 
   async playGame () {
-    this.channel = this.game.connection.pusher.subscribe('private-game-' + this.game.connection.gamecode)
-    this.channel.bind('client-value', (data) => {
-      if (data.value === null || data.value === undefined) throw new Error('got empty value from remote')
-      // this.inbox.enqueue(data.value)
-      this.inbox.enqueue(data.value)
-    })
+    // Pusher channel subscription is only needed for online multiplayer,
+    // which is currently disabled. Single-player / local two-player boot
+    // cleanly without hitting the auth endpoint.
+    if (this.game.isMultiplayer()) {
+      this.channel = this.game.connection.pusher.subscribe('private-game-' + this.game.connection.gamecode)
+      this.channel.bind('client-value', (data) => {
+        if (data.value === null || data.value === undefined) throw new Error('got empty value from remote')
+        this.inbox.enqueue(data.value)
+      })
 
-    await new Promise((resolve, reject) => {
-      this.channel.bind('pusher:subscription_succeeded', resolve)
-      this.channel.bind('pusher:subscription_error', reject)
-    })
+      await new Promise((resolve, reject) => {
+        this.channel.bind('pusher:subscription_succeeded', resolve)
+        this.channel.bind('pusher:subscription_error', reject)
+      })
+    }
 
     // Performing Initial Handshake
     if (this.game.isMultiplayer()) {
