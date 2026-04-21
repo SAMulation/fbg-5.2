@@ -9,6 +9,7 @@
  */
 
 import { reduce, initialState, seededRng } from './engine.js'
+import { fbgLog } from './log.js'
 
 class LocalChannel {
   constructor () {
@@ -58,6 +59,7 @@ class LocalChannel {
       console.warn('localSession: dispatchAction before init')
       return
     }
+    fbgLog('session', 'dispatch', action.type, action)
     const rng = seededRng((this.seedBase + this.actionCount) >>> 0)
     this.actionCount++
     let result
@@ -69,6 +71,8 @@ class LocalChannel {
       return
     }
     this.state = result.state
+    fbgLog('session', 'broadcast phase=' + result.state.phase,
+      'events=[' + result.events.map((e) => e.type).join(',') + ']')
     this._broadcast({ state: result.state, events: result.events })
   }
 

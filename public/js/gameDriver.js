@@ -19,6 +19,7 @@ import Player from './player.js'
 import Team from './team.js'
 import { TEAMS } from './teams.js'
 import { animateResolution } from './animator.js'
+import { fbgLog } from './log.js'
 
 const TERMINAL_EVENTS = new Set([
   'PLAY_RESOLVED', 'TOUCHDOWN', 'SAFETY', 'TURNOVER', 'TURNOVER_ON_DOWNS',
@@ -54,7 +55,7 @@ export class GameDriver {
           this._applyStateToGame(rejoin)
           this.state = rejoin
           didRejoin = true
-          console.log('[driver] rejoined at phase:', rejoin.phase)
+          fbgLog('driver', 'rejoined at phase:', rejoin.phase)
         }
       }
       if (!didRejoin) {
@@ -69,7 +70,9 @@ export class GameDriver {
       await this._handleGameOver()
     } catch (e) {
       console.error('[driver] fatal:', e)
-      await alertBox(this.run, 'Game error: ' + (e.message || e))
+      this.fatalError = e
+      try { await alertBox(this.run, 'Game error: ' + (e.message || e)) } catch {}
+      throw e
     }
   }
 
@@ -174,13 +177,13 @@ export class GameDriver {
     this.state = afterStart.state
     this._applyStateToGame(this.state)
     this._stashResumeToken()
-    console.log('[driver] setup complete, phase:', this.state.phase)
+    fbgLog('driver', 'setup complete, phase:', this.state.phase)
   }
 
   // ------------- main loop -------------
 
   async _driveOne () {
-    console.log('[driver] phase=' + this.state.phase + ' offense=' + this.state.field.offense + ' down=' + this.state.field.down + ' ballOn=' + this.state.field.ballOn)
+    fbgLog('driver', 'phase=' + this.state.phase + ' offense=' + this.state.field.offense + ' down=' + this.state.field.down + ' ballOn=' + this.state.field.ballOn)
     switch (this.state.phase) {
       case 'COIN_TOSS': return this._doCoinToss()
       case 'KICKOFF': return this._doKickoff()
@@ -291,12 +294,12 @@ export class GameDriver {
     const game = this.game
     this._resetPlayUI()
 
-    console.log('[driver] awaiting local pick p=' + this.me)
+    fbgLog('driver', 'awaiting local pick p=' + this.me)
     const myPlay = await this.run.input.getInput(
       game, this.me, 'reg',
       game.players[this.me].team.name + ' pick your play...'
     )
-    console.log('[driver] local pick =', myPlay)
+    fbgLog('driver', 'local pick =', myPlay)
     game.players[this.me].currentPlay = myPlay
 
     const amOffense = this.state.field.offense === this.me
@@ -319,7 +322,7 @@ export class GameDriver {
     while (!resolved) {
       const { state, events } = await this._nextState()
       allEvents.push(...events)
-      console.log('[driver] broadcast:', events.map(e => e.type).join(','))
+      fbgLog('driver', 'broadcast:', events.map(e => e.type).join(','))
 
       if (!amOffense && !defenseDispatched) {
         const offenseCalled = events.some(e => e.type === 'PLAY_CALLED' && e.player === this.state.field.offense)
@@ -350,12 +353,12 @@ export class GameDriver {
     const defense = offense === 1 ? 2 : 1
 
     // Offense picks first.
-    console.log('[driver-local] awaiting offense (p' + offense + ')')
+    fbgLog('driver', 'local: awaiting offense (p' + offense + ')')
     const offPlay = await this.run.input.getInput(
       game, offense, 'reg',
       game.players[offense].team.name + ' pick your play...'
     )
-    console.log('[driver-local] offense picked =', offPlay)
+    fbgLog('driver', 'local: offense picked =', offPlay)
     game.players[offense].currentPlay = offPlay
 
     // Fourth-down special choices short-circuit — they don't need a defense pick.
@@ -376,12 +379,12 @@ export class GameDriver {
     const preEvents = first.events
 
     // Now defense.
-    console.log('[driver-local] awaiting defense (p' + defense + ')')
+    fbgLog('driver', 'local: awaiting defense (p' + defense + ')')
     const defPlay = await this.run.input.getInput(
       game, defense, 'reg',
       game.players[defense].team.name + ' pick your play...'
     )
-    console.log('[driver-local] defense picked =', defPlay)
+    fbgLog('driver', 'local: defense picked =', defPlay)
     game.players[defense].currentPlay = defPlay
 
     this.channel.dispatchAction({ type: 'PICK_PLAY', player: defense, play: defPlay })
@@ -416,7 +419,7 @@ export class GameDriver {
     while (true) {
       const { state, events } = await this._nextState()
       allEvents.push(...events)
-      console.log('[driver] broadcast:', events.map(e => e.type).join(','))
+      fbgLog('driver', 'broadcast:', events.map(e => e.type).join(','))
       const hasTerminal = events.some(e => TERMINAL_EVENTS.has(e.type))
       const pendingCleared = !state.pendingPick.offensePlay &&
                              !state.pendingPick.defensePlay &&
@@ -486,6 +489,10 @@ export class GameDriver {
   }
 
   async _tickClock (seconds) {
+    // In OT the engine's clock is frozen at 0; dispatching TICK_CLOCK
+    // retriggers QUARTER_ENDED → startOvertime and spirals into an
+    // infinite OT_START/OT_PLAY loop. Game-over also has no clock.
+    if (this.state.clock.quarter > 4 || this.state.phase === 'GAME_OVER') return
     if (this.host) {
       this.channel.dispatchAction({ type: 'TICK_CLOCK', seconds })
     }

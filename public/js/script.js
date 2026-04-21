@@ -1,4 +1,4 @@
-/* global LZString */
+/* global LZString, location, URLSearchParams */
 /* global prompt, alert */
 import Team from './team.js'
 import Game from './game.js'
@@ -395,6 +395,53 @@ if (window.localStorage.getItem('savedGame')) {
   resumeSelection.removeAttribute('disabled')
 }
 await setTeamLists(document.querySelectorAll('.teamList'))
-// submitTeams(site, document.querySelector('#gameForm'))
-// pressPlayButton(document.querySelector('.playButton'), site)
 attachNextEvent(site, setupButtons)
+
+// Dev shortcut: ?dev=<mode> skips the start screen.
+//   ?dev=single            single-player vs CPU
+//   ?dev=double            local two-player
+//   ?dev=computer          0-player (CPU vs CPU)
+//   ?dev=host              online host (creates code, waits)
+//   ?dev=remote&code=XXX   online remote (joins code)
+// Optional: &t1=NE&t2=GB to pin teams, &q=7 to pin quarter length.
+const devMode = new URLSearchParams(location.search).get('dev')
+if (devMode) {
+  const qs = new URLSearchParams(location.search)
+  const t1 = qs.get('t1')
+  const t2 = qs.get('t2')
+  const q = qs.get('q')
+  const pinTeam = (selectId, abrv) => {
+    if (!abrv) return
+    const sel = document.getElementById(selectId)
+    const idx = TEAMS.findIndex((t) => t.abrv === abrv.toUpperCase())
+    if (idx >= 0) sel.selectedIndex = idx
+  }
+  pinTeam('p1Team', t1)
+  pinTeam('p2Team', t2)
+  if (q) pickQtrLen.value = q
+  site.home = parseInt(pickHome.value)
+  site.qtrLength = parseInt(pickQtrLen.value)
+
+  if (devMode === 'remote') {
+    site.gamecode = qs.get('code') || ''
+    if (!site.gamecode) {
+      console.error('[dev] ?dev=remote requires &code=XXX')
+    } else {
+      joinOnlineGame(site)
+        .then(() => { startScreen.style.display = 'none'; submitGame(site, 'remote') })
+        .catch((err) => console.error('[dev] join failed:', err))
+    }
+  } else if (devMode === 'host') {
+    site.connectionType = 'host'
+    generateCode(site).then(() => {
+      console.log('[dev] host code:', site.gamecode)
+      startScreen.style.display = 'none'
+      submitGame(site, 'host')
+    })
+  } else if (['single', 'double', 'computer'].includes(devMode)) {
+    startScreen.style.display = 'none'
+    submitGame(site, devMode)
+  } else {
+    console.error('[dev] unknown mode:', devMode)
+  }
+}

@@ -59,16 +59,30 @@ export const animationSimple = (el, cls, on = true) => {
 }
 
 export const animationWaitForCompletion = async (el, cls, on = true) => {
+  // If the class is already in the target state, animationSimple will not
+  // toggle it, which means NO transitionend ever fires and we'd hang.
+  // Resolve immediately in that case.
+  const has = el.classList.contains(cls)
+  if ((on && has) || (!on && !has)) return
+
   return new Promise(resolve => {
-    const handler = () => {
-      el.removeEventListener('transitionend', handler)
-      el.removeEventListener('transitioncancel', handler)
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      el.removeEventListener('transitionend', finish)
+      el.removeEventListener('transitioncancel', finish)
       resolve()
     }
 
-    el.addEventListener('transitionend', handler)
-    el.addEventListener('transitioncancel', handler)
+    el.addEventListener('transitionend', finish)
+    el.addEventListener('transitioncancel', finish)
     animationSimple(el, cls, on)
+
+    // Safety net: if no CSS transition is defined for this class change,
+    // `transitionend` will never fire. Bail after a reasonable wall time
+    // rather than hanging the whole play loop.
+    setTimeout(finish, 800)
   })
 }
 

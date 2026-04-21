@@ -1,0 +1,186 @@
+/**
+ * Minimal DOM stub — enough for run.js / animator.js / graphics.js /
+ * gameDriver.js to load and run without a browser.
+ *
+ * What it provides:
+ *   • globalThis.document with querySelector/All, createElement,
+ *     documentElement, body
+ *   • globalThis.window with addEventListener, localStorage
+ *   • globalThis.localStorage
+ *   • Any returned "element" is a proxy that accepts every chained
+ *     call without throwing (classList, querySelector, style, events,
+ *     attributes, innerText, appendChild, etc).
+ *   • transitionend fires synchronously on classList changes so
+ *     animationWaitForCompletion resolves immediately.
+ *   • setTimeout is left alone (real timing), but scoreboard sleeps
+ *     can be skipped by stubbing alertBox at the graphics layer or by
+ *     monkey-patching `run.game.animation = false`.
+ */
+
+function makeElement (tagHint = 'div') {
+  const classes = new Set()
+  const listeners = new Map()
+  const attrs = new Map()
+  let innerText = ''
+  let innerHTML = ''
+  const el = {
+    _classes: classes,
+    tagName: tagHint.toUpperCase(),
+    get innerText () { return innerText },
+    set innerText (v) { innerText = String(v) },
+    get innerHTML () { return innerHTML },
+    set innerHTML (v) { innerHTML = String(v) },
+    get className () { return [...classes].join(' ') },
+    set className (v) {
+      classes.clear()
+      for (const c of String(v).split(/\s+/)) if (c) classes.add(c)
+    },
+    disabled: false,
+    scrollTop: 0,
+    offsetHeight: 100,
+    offsetWidth: 100,
+    style: {
+      setProperty () {},
+      getPropertyValue () { return '' },
+      removeProperty () {}
+    },
+    classList: {
+      add (...cs) {
+        for (const c of cs) classes.add(c)
+        fire('transitionend')
+      },
+      remove (...cs) {
+        for (const c of cs) classes.delete(c)
+        fire('transitionend')
+      },
+      toggle (c, force) {
+        const should = force === undefined ? !classes.has(c) : !!force
+        if (should) classes.add(c); else classes.delete(c)
+        fire('transitionend')
+      },
+      contains (c) { return classes.has(c) }
+    },
+    querySelector () { return makeElement() },
+    querySelectorAll () { return [makeElement()] },
+    addEventListener (ev, cb) {
+      if (!listeners.has(ev)) listeners.set(ev, new Set())
+      listeners.get(ev).add(cb)
+    },
+    removeEventListener (ev, cb) {
+      const set = listeners.get(ev)
+      if (set) set.delete(cb)
+    },
+    dispatchEvent () { return true },
+    setAttribute (k, v) { attrs.set(k, String(v)) },
+    getAttribute (k) { return attrs.has(k) ? attrs.get(k) : null },
+    removeAttribute (k) { attrs.delete(k) },
+    hasAttribute (k) { return attrs.has(k) },
+    appendChild (child) { return child },
+    removeChild () {},
+    cloneNode () { return makeElement() },
+    focus () {},
+    blur () {},
+    click () {
+      const set = listeners.get('click')
+      if (set) for (const cb of set) try { cb({ target: el }) } catch (e) { console.error(e) }
+    },
+    children: [],
+    childNodes: [],
+    firstChild: null,
+    firstElementChild: null,
+    parentElement: null,
+    parentNode: null,
+    nextElementSibling: null,
+    previousElementSibling: null,
+    textContent: ''
+  }
+  function fire (event) {
+    const set = listeners.get(event)
+    if (!set) return
+    for (const cb of set) {
+      try { cb({ target: el, currentTarget: el }) } catch (e) { console.error('stub event handler:', e) }
+    }
+  }
+  return el
+}
+
+class LocalStorageStub {
+  constructor () { this._map = new Map() }
+  getItem (k) { return this._map.has(k) ? this._map.get(k) : null }
+  setItem (k, v) { this._map.set(k, String(v)) }
+  removeItem (k) { this._map.delete(k) }
+  clear () { this._map.clear() }
+  get length () { return this._map.size }
+  key (i) { return [...this._map.keys()][i] ?? null }
+}
+
+/**
+ * Capture the real setTimeout BEFORE any monkey-patching so callers
+ * (like the harness's per-game watchdog) can use it.
+ */
+export const realSetTimeout = globalThis.setTimeout.bind(globalThis)
+export const realClearTimeout = globalThis.clearTimeout.bind(globalThis)
+
+/**
+ * Short-circuit setTimeout for in-game sleeps. Anything ≤ maxMs
+ * resolves on next microtask; bigger timers still work.
+ */
+export function installFastTimers (maxMs = 3100) {
+  const origSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn, ms, ...rest) => {
+    if (ms !== undefined && ms <= maxMs) {
+      // Still async — preserves event-loop ordering — but instant.
+      Promise.resolve().then(() => { try { fn(...rest) } catch (e) { console.error(e) } })
+      return 0
+    }
+    return origSetTimeout(fn, ms, ...rest)
+  }
+}
+
+export function setupDomStub () {
+  const documentElement = makeElement('html')
+  // documentElement.style needs setProperty for run.prepareHTML
+  documentElement.style = {
+    setProperty () {},
+    getPropertyValue () { return '' },
+    removeProperty () {}
+  }
+  const body = makeElement('body')
+  documentElement.body = body
+
+  const doc = {
+    documentElement,
+    body,
+    head: makeElement('head'),
+    querySelector () { return makeElement() },
+    querySelectorAll () { return [makeElement()] },
+    getElementById () { return makeElement() },
+    createElement (tag) { return makeElement(tag) },
+    createTextNode (text) {
+      return { nodeType: 3, textContent: String(text), data: String(text) }
+    },
+    addEventListener () {},
+    removeEventListener () {}
+  }
+
+  globalThis.document = doc
+  globalThis.window = globalThis.window || {}
+  globalThis.window.addEventListener = () => {}
+  globalThis.window.removeEventListener = () => {}
+  globalThis.window.localStorage = new LocalStorageStub()
+
+  globalThis.localStorage = globalThis.window.localStorage
+  // navigator is a read-only getter in Node 22+. Skip it — nothing on the
+  // hot path reaches navigator.clipboard in the driver.
+  globalThis.HTMLElement = class HTMLElement {}
+  globalThis.Element = class Element {}
+  globalThis.Node = class Node {}
+  globalThis.location = globalThis.location || { search: '', protocol: 'http:', host: 'localhost:3000', port: '3000' }
+
+  // Optional: fake CustomEvent / Event
+  if (!globalThis.Event) {
+    globalThis.Event = class Event {
+      constructor (type) { this.type = type }
+    }
+  }
+}

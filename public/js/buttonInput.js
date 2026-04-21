@@ -1,5 +1,6 @@
 import BaseInput from './baseInput.js'
 import { alertBox, animationSimple, animationWaitForCompletion } from './graphics.js'
+import { fbgLog } from './log.js'
 
 export default class ButtonInput extends BaseInput {
   // Old version
@@ -164,11 +165,11 @@ export default class ButtonInput extends BaseInput {
       game.run.alertMessage.innerText = msg
     }
 
-    console.log('[input] awaiting pick for p=' + p + ' type=' + (msg ? 'button' : '?'))
+    fbgLog('input', 'awaiting pick for p=' + p + ' type=' + (msg ? 'button' : '?'))
     buttons.forEach(button => {
       button.addEventListener('click', event => {
         const play = event.target.getAttribute('data-playType')
-        console.log('[input] picked', play, 'for p=' + p)
+        fbgLog('input', 'picked', play, 'for p=' + p)
         resolve(play)
         if (play !== 'TO') {
           game.run.alertMessage.disabled = true
