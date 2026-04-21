@@ -10,9 +10,12 @@ name = "GAME_ROOM"
 class_name = "GameRoom"
 
 # DO classes need a migration tag the first time they're deployed.
+# Free plan requires SQLite-backed DOs (new_sqlite_classes). Paid plans
+# can also use the legacy key-value store (new_classes); SQLite is the
+# modern default and what we're using for engineState + action log.
 [[migrations]]
 tag = "v1"
-new_classes = ["GameRoom"]
+new_sqlite_classes = ["GameRoom"]
 
 # Serve the FBG static client from ../../public on the same domain. Single
 # origin means the client WebSocket URL is just wss://<worker-host>/api/ws.
