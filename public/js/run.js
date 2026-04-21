@@ -8,7 +8,7 @@ import { Queue } from './queue.js'
 import { CHANGE, TB, PEN_DOWN, PEN_NO_DOWN, TIMEOUT, TWOMIN, SAFETY_KICK, KICKOFF, KICK, INIT, INIT_OTC, REG, OFF_TP, DEF_TP, SAME, FG, PUNT, HAIL, TWO_PT, TD, SAFETY, LEAVE, P1_WINS, P2_WINS, EXIT, TWOPT, OT_START, MODAL_MESSAGES } from './defaults.js'
 // Engine bundle (built from packages/engine via `npm run build:browser`).
 // All deterministic game math should flow through this — DOM/animation stays in run.js.
-import { MULTI, matchupQuality, resolveHailMary } from './engine.js'
+import { MULTI, matchupQuality, resolveFieldGoal, resolveHailMary } from './engine.js'
 import { buildEngineState, replayRng } from './engineBridge.js'
 import { alertBox, sleep, setBallSpot, setSpot, animationSimple, animationWaitForCompletion, animationWaitThenHide, animationPrePick, animationPostPick, resetBoardContainer, firstDownLine } from './graphics.js'
 
@@ -2043,38 +2043,32 @@ export default class Run {
 
   async fieldGoal (game) {
     const name = game.players[game.offNum].team.name
-    let make = true
-    const spt = 100 - game.spot
-    const fdst = spt + 17
-    let die = null
-    die = await Utils.rollDie(game, game.me)
+    const fdst = (100 - game.spot) + 17
+    const die = await Utils.rollDie(game, game.me)
+    const iced = game.changeTime === TIMEOUT && game.lastCallTO !== game.offNum
 
     if (game.animation) await animationWaitForCompletion(this.fieldContainer, 'slide-away', false)
     await alertBox(this, name + ' attempting a ' + fdst + '-yard field goal...')
     this.playerContainer.classList.toggle('fade', true)
 
-    // Ice kicker
-    if (game.changeTime === TIMEOUT && game.lastCallTO !== game.offNum) {
-      die++
-      await alertBox(this, 'Kicker iced!')
-    }
+    if (iced) await alertBox(this, 'Kicker iced!')
 
-    if (fdst > 65) {
-      let tmp = null
-      tmp = await Utils.randInt(1, 1000, game, game.me)
-      make = tmp === fdst // 1 in 1000 chance you get fdst
-    } else if ((fdst >= 60 && die < 6) || (fdst >= 50 && die < 5) || (fdst >= 40 && die < 4) || (fdst >= 30 && die < 3) || (fdst >= 20 && die < 2)) {
-      make = false
-    }
+    // Extreme-distance path needs an extra random number; pre-fetch it async
+    // so multiplayer RNG-sync still routes correctly, then feed both to the
+    // engine via replayRng (engine consumes intBetween(1,1000) on that branch).
+    const extra = fdst > 65 ? await Utils.randInt(1, 1000, game, game.me) : null
+    const rng = replayRng(extra !== null ? [die, extra] : [die])
+    const engineState = buildEngineState(game)
+    const result = resolveFieldGoal(engineState, rng, { iced })
+
+    const make = result.events.some(e => e.type === 'FIELD_GOAL_GOOD')
 
     await this.fgAnimation(game, fdst - 10, make)
 
     if (make) {
       await this.scoreChange(game, game.offNum, 3)
-      if (game.isOT()) {
-        // Maybe the graphics are different here
-      } else {
-        game.status = -3
+      if (!game.isOT()) {
+        game.status = -3 // queue kickoff
       }
     } else {
       await alertBox(this, name + ' field goal is no good...')
