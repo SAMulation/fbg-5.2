@@ -1505,6 +1505,7 @@ export {
   resolveKickoff,
   resolveOffensiveTrickPlay,
   resolvePunt,
+  resolveRegularPlay,
   resolveSamePlay,
   resolveTwoPointConversion,
   samePlayOutcome,
