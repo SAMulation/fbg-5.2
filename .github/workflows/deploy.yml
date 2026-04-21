@@ -1,0 +1,56 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # Also let us re-run from the Actions tab without a new commit.
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    name: test + deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # ─── Install workspaces ──────────────────────────────────────────
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install engine deps
+        working-directory: packages/engine
+        run: npm ci
+
+      - name: Install worker deps
+        working-directory: packages/worker
+        run: npm ci
+
+      # ─── Test the engine ─────────────────────────────────────────────
+      - name: Run engine tests
+        run: npm run test:engine
+
+      # ─── Rebuild the browser bundle ──────────────────────────────────
+      # public/js/engine.js is committed but we rebuild in CI so a drifted
+      # local bundle can't ship stale. This also catches engine changes
+      # that weren't re-bundled locally before push.
+      - name: Build engine browser bundle
+        run: npm run build:engine
+
+      # ─── Deploy to Cloudflare ────────────────────────────────────────
+      - name: Deploy Worker + Durable Object + static assets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: packages/worker
+          command: deploy
