@@ -53,7 +53,9 @@ const { setFbgLogNamespaces } = await import('../../public/js/log.js')
 const { HarnessInput, randomStrategy, alwaysShortRunStrategy } = await import('./harness-input.mjs')
 
 const N = parseInt(process.env.N || '1', 10)
-const TIMEOUT = parseInt(process.env.TIMEOUT || '30000', 10)
+// Online games run real-time animations (sleep(2000) on TD, ~300ms per play).
+// With QTR=1, games legitimately take 30-80s. Default high enough to cover.
+const TIMEOUT = parseInt(process.env.TIMEOUT || '180000', 10)
 const LOG = process.env.LOG || ''
 const STRATEGY = process.env.STRATEGY || 'random'
 const QTR = parseInt(process.env.QTR || '1', 10)

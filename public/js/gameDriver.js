@@ -628,7 +628,8 @@ export class GameDriver {
     await alertBox(this.run, winnerName + ' win ' + Math.max(s1, s2) + ' - ' + Math.min(s1, s2) + '!')
     this._clearResumeToken()
 
-    if (!this.isLocal) {
+    // Skip the rematch prompt in headless mode — no UI to click through.
+    if (!this.isLocal && this.run.input?.type !== 'harness') {
       await this._offerRematch()
     }
   }
