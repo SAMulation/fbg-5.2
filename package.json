@@ -5,7 +5,11 @@
   "main": "script2.test.js",
   "scripts": {
     "test": "jest --watchAll",
-    "build": "netlify-lambda build server"
+    "build": "netlify-lambda build server",
+    "build:engine": "cd packages/engine && npm run build:browser",
+    "test:engine": "cd packages/engine && npm run test",
+    "dev": "npm run build:engine && node server-local.js",
+    "start": "node server-local.js"
   },
   "repository": {
     "type": "git",
