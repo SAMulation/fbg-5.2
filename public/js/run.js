@@ -1341,6 +1341,17 @@ export default class Run {
     game.players[1].currentPlay = null
     game.players[2].currentPlay = null
 
+    // Defensive: the next step (prepareAndGetUserInput) awaits
+    // animationWaitForCompletion(cardsContainer, 'slide-down', false).
+    // If the class isn't there (possible after a drifted animator state),
+    // animationSimple no-ops and transitionend never fires — the whole
+    // play loop hangs. Force the class to be present before we start.
+    if (!this.cardsContainer.classList.contains('slide-down')) {
+      this.cardsContainer.classList.add('slide-down')
+      await sleep(50) // let the DOM paint so the upcoming remove actually transitions
+    }
+    console.log('[server] awaiting local play pick, phase=' + game.engineState.phase + ' offense=' + game.offNum + ' me=' + game.me)
+
     const myPlay = await this.input.getInput(
       game, game.me, 'reg',
       game.players[game.me].team.name + ' pick your play...'
