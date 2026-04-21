@@ -88,6 +88,8 @@ export interface OvertimeState {
   possession: PlayerId;
   /** Player who received first in OT (so we can alternate). */
   firstReceiver: PlayerId;
+  /** Possessions remaining in this period (2 = both pending, 1 = one done, 0 = period over). */
+  possessionsRemaining: 0 | 1 | 2;
 }
 
 export interface PendingPick {

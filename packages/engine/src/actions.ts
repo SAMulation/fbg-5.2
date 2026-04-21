@@ -24,5 +24,11 @@ export type Action =
    * KICKOFF phase. Engine runs the kickoff mechanic and transitions to REG_PLAY.
    */
   | { type: "RESOLVE_KICKOFF" }
+  /**
+   * Begin the next OT possession (or first possession of a new OT period).
+   * Sent by the orchestrator after entering OT_START phase or after the
+   * previous OT possession ended.
+   */
+  | { type: "START_OT_POSSESSION" }
   /** Tick the clock by N seconds — used for the natural 30s-per-play decrement. */
   | { type: "TICK_CLOCK"; seconds: number };

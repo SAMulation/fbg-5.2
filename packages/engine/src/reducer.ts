@@ -21,6 +21,7 @@ import type { GameState } from "./types.js";
 import type { Rng } from "./rng.js";
 import { isRegularPlay, resolveRegularPlay } from "./rules/play.js";
 import {
+  resolveDefensiveTrickPlay,
   resolveFieldGoal,
   resolveHailMary,
   resolveKickoff,
@@ -28,6 +29,12 @@ import {
   resolvePunt,
   resolveSamePlay,
 } from "./rules/specials/index.js";
+import {
+  endOvertimePossession,
+  isPossessionEndingInOT,
+  startOvertime,
+  startOvertimePossession,
+} from "./rules/overtime.js";
 import { opp } from "./state.js";
 
 export interface ReduceResult {
@@ -36,6 +43,32 @@ export interface ReduceResult {
 }
 
 export function reduce(state: GameState, action: Action, rng: Rng): ReduceResult {
+  const result = reduceCore(state, action, rng);
+  return applyOvertimeRouting(state, result);
+}
+
+/**
+ * If we're in OT and a possession-ending event just fired, route to the
+ * next OT possession (or game end). Skips when the action is itself an OT
+ * helper (so we don't double-route).
+ */
+function applyOvertimeRouting(prevState: GameState, result: ReduceResult): ReduceResult {
+  // Only consider routing when we *were* in OT. (startOvertime sets state.overtime.)
+  if (!prevState.overtime && !result.state.overtime) return result;
+  if (!result.state.overtime) return result;
+  if (!isPossessionEndingInOT(result.events)) return result;
+
+  // PAT in OT: a TD scored, but possession doesn't end until PAT/2pt resolves.
+  // PAT_GOOD / TWO_POINT_* are themselves possession-ending, so they DO route.
+  // After possession ends, decide next.
+  const ended = endOvertimePossession(result.state);
+  return {
+    state: ended.state,
+    events: [...result.events, ...ended.events],
+  };
+}
+
+function reduceCore(state: GameState, action: Action, rng: Rng): ReduceResult {
   switch (action.type) {
     case "START_GAME":
       return {
@@ -88,9 +121,41 @@ export function reduce(state: GameState, action: Action, rng: Rng): ReduceResult
       return { state: result.state, events: result.events };
     }
 
+    case "START_OT_POSSESSION": {
+      const r = startOvertimePossession(state);
+      return { state: r.state, events: r.events };
+    }
+
     case "PICK_PLAY": {
       const offense = state.field.offense;
       const isOffensiveCall = action.player === offense;
+
+      // Validate. Illegal picks are silently no-op'd; the orchestrator
+      // (server / UI) is responsible for surfacing the error to the user.
+      if (action.play === "FG" || action.play === "PUNT" || action.play === "TWO_PT") {
+        return { state, events: [] }; // wrong action type for these
+      }
+      if (action.play === "HM" && !isOffensiveCall) {
+        return { state, events: [] }; // defense can't call Hail Mary
+      }
+      const hand = state.players[action.player].hand;
+      if (action.play === "HM" && hand.HM <= 0) {
+        return { state, events: [] };
+      }
+      if (
+        (action.play === "SR" || action.play === "LR" || action.play === "SP" || action.play === "LP" || action.play === "TP") &&
+        hand[action.play] <= 0
+      ) {
+        return { state, events: [] };
+      }
+      // Reject re-picks for the same side in the same play.
+      if (isOffensiveCall && state.pendingPick.offensePlay) {
+        return { state, events: [] };
+      }
+      if (!isOffensiveCall && state.pendingPick.defensePlay) {
+        return { state, events: [] };
+      }
+
       const events: Event[] = [
         { type: "PLAY_CALLED", player: action.player, play: action.play },
       ];
@@ -110,10 +175,26 @@ export function reduce(state: GameState, action: Action, rng: Rng): ReduceResult
           return { state: hm.state, events: [...events, ...hm.events] };
         }
 
-        // Trick Play by offense.
-        if (pendingPick.offensePlay === "TP") {
+        // Trick Play by either side. v5.1 (run.js:1886): if both pick TP,
+        // Same Play coin always triggers — falls through to Same Play below.
+        if (
+          pendingPick.offensePlay === "TP" &&
+          pendingPick.defensePlay !== "TP"
+        ) {
           const tp = resolveOffensiveTrickPlay(stateWithPick, rng);
           return { state: tp.state, events: [...events, ...tp.events] };
+        }
+        if (
+          pendingPick.defensePlay === "TP" &&
+          pendingPick.offensePlay !== "TP"
+        ) {
+          const tp = resolveDefensiveTrickPlay(stateWithPick, rng);
+          return { state: tp.state, events: [...events, ...tp.events] };
+        }
+        if (pendingPick.offensePlay === "TP" && pendingPick.defensePlay === "TP") {
+          // Both TP → Same Play unconditionally.
+          const sp = resolveSamePlay(stateWithPick, rng);
+          return { state: sp.state, events: [...events, ...sp.events] };
         }
 
         // Regular vs regular.
@@ -177,7 +258,13 @@ export function reduce(state: GameState, action: Action, rng: Rng): ReduceResult
 
     case "PAT_CHOICE": {
       const scorer = state.field.offense;
-      if (action.choice === "kick") {
+      // 3OT+ requires 2-point conversion. Silently substitute even if "kick"
+      // was sent (matches v5.1's "must" behavior at run.js:1641).
+      const effectiveChoice =
+        state.overtime && state.overtime.period >= 3
+          ? "two_point"
+          : action.choice;
+      if (effectiveChoice === "kick") {
         // Assume automatic in v5.1 — no mechanic recorded for PAT kicks.
         const newPlayers = {
           ...state.players,
@@ -290,20 +377,10 @@ export function reduce(state: GameState, action: Action, rng: Rng): ReduceResult
           return { state: { ...state, phase: "GAME_OVER" }, events };
         }
         // Tied — head to overtime.
-        events.push({ type: "OVERTIME_STARTED", period: 1, possession: 1 });
-        return {
-          state: {
-            ...state,
-            phase: "OT_START",
-            overtime: {
-              period: 1,
-              possession: 1,
-              firstReceiver: 1,
-            },
-            clock: { ...state.clock, quarter: 5, secondsRemaining: 0 },
-          },
-          events,
-        };
+        const otClock = { ...state.clock, quarter: 5, secondsRemaining: 0 };
+        const ot = startOvertime({ ...state, clock: otClock });
+        events.push(...ot.events);
+        return { state: ot.state, events };
       }
 
       return {

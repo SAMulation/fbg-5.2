@@ -117,6 +117,42 @@ describe("PICK_PLAY (regular play)", () => {
     }
   });
 
+  it("refuses a play the offense doesn't have in hand", () => {
+    const s = startingState();
+    s.players[1].hand.LR = 0;
+    const r = reduce(s, { type: "PICK_PLAY", player: 1, play: "LR" }, seededRng(1));
+    expect(r.state).toBe(s);
+    expect(r.events).toEqual([]);
+  });
+
+  it("refuses Hail Mary call from defense", () => {
+    const s = startingState();
+    const r = reduce(s, { type: "PICK_PLAY", player: 2, play: "HM" }, seededRng(1));
+    expect(r.events).toEqual([]);
+  });
+
+  it("refuses Hail Mary when offense has 0 HM remaining", () => {
+    const s = startingState();
+    s.players[1].hand.HM = 0;
+    const r = reduce(s, { type: "PICK_PLAY", player: 1, play: "HM" }, seededRng(1));
+    expect(r.events).toEqual([]);
+  });
+
+  it("refuses re-pick on the same side", () => {
+    const s = startingState();
+    const r1 = reduce(s, { type: "PICK_PLAY", player: 1, play: "LR" }, seededRng(1));
+    const r2 = reduce(r1.state, { type: "PICK_PLAY", player: 1, play: "SR" }, seededRng(1));
+    expect(r2.state).toBe(r1.state);
+    expect(r2.events).toEqual([]);
+  });
+
+  it("refuses FG / PUNT / TWO_PT through PICK_PLAY (use FOURTH_DOWN/PAT actions)", () => {
+    const s = startingState();
+    expect(reduce(s, { type: "PICK_PLAY", player: 1, play: "FG" }, seededRng(1)).events).toEqual([]);
+    expect(reduce(s, { type: "PICK_PLAY", player: 1, play: "PUNT" }, seededRng(1)).events).toEqual([]);
+    expect(reduce(s, { type: "PICK_PLAY", player: 1, play: "TWO_PT" }, seededRng(1)).events).toEqual([]);
+  });
+
   it("is deterministic for identical seeds", () => {
     const a = reduce(
       reduce(startingState(), { type: "PICK_PLAY", player: 1, play: "LR" }, seededRng(7)).state,
