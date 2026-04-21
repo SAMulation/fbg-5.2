@@ -1368,8 +1368,58 @@ export default class Run {
       game.thisPlay.dist = flipped ? (100 - newBallOn) - prevBallOn : newBallOn - prevBallOn
     }
 
-    if (isTD) game.status = 101
-    else if (isSafety) game.status = 102
+    // Narrate the result with a lean alert (replaces v5.1's multi-stage
+    // reportPlay animation, which doesn't play well with server-driven
+    // state). An event-driven animator can restore the fancy reveal later.
+    await this._narratePlayResolution(game, resolved)
+
+    if (isTD) {
+      game.status = 101
+    } else if (isSafety) {
+      game.status = 102
+    } else {
+      // Sentinel that keeps endPlay out of calcDist/reportPlay/updateDown.
+      // We handle field sync below; v5.1's updateDown would fight us with
+      // stale assumptions.
+      this._syncFieldFrom(game, resolved.state)
+      await setBallSpot(this)
+      await firstDownLine(this)
+      this.printMsgDown(game, this.scoreboardContainer)
+      this.printMsgSpot(game, this.scoreboardContainer)
+      game.status = FG
+    }
+  }
+
+  async _narratePlayResolution (game, resolved) {
+    const playEvent = resolved.events.find(e => e.type === 'PLAY_RESOLVED')
+    const offName = game.players[game.offNum].team.name
+    const defName = game.players[game.defNum].team.name
+    const p1 = game.players[game.offNum].currentPlay
+    const p2 = game.players[game.defNum].currentPlay
+    const firstDown = resolved.events.some(e => e.type === 'FIRST_DOWN')
+    const turnoverDowns = resolved.events.some(e => e.type === 'TURNOVER_ON_DOWNS')
+    const interception = resolved.events.some(e => e.type === 'TURNOVER' && e.reason === 'interception')
+    const fumble = resolved.events.some(e => e.type === 'TURNOVER' && e.reason === 'fumble')
+    const safety = resolved.events.some(e => e.type === 'SAFETY')
+    const td = resolved.events.some(e => e.type === 'TOUCHDOWN')
+
+    let line
+    if (playEvent) {
+      const yardsStr = playEvent.yardsGained > 0
+        ? 'a ' + playEvent.yardsGained + '-yard gain'
+        : playEvent.yardsGained < 0 ? 'a ' + Math.abs(playEvent.yardsGained) + '-yard loss' : 'no gain'
+      line = p1 + ' vs ' + p2 + ': ' + yardsStr + '.'
+    } else {
+      line = p1 + ' vs ' + p2 + '.'
+    }
+    await alertBox(this, line)
+
+    if (td) await alertBox(this, offName + ' — TOUCHDOWN!')
+    else if (safety) await alertBox(this, defName + ' — SAFETY!')
+    else if (interception) await alertBox(this, defName + ' intercepted the ball!')
+    else if (fumble) await alertBox(this, defName + ' recovered a fumble!')
+    else if (turnoverDowns) await alertBox(this, 'Turnover on downs.')
+    else if (firstDown) await alertBox(this, 'First down!')
   }
 
   _syncFieldFrom (game, engineState) {
