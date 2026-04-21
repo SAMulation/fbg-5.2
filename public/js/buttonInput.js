@@ -63,9 +63,19 @@ export default class ButtonInput extends BaseInput {
     this.switchCardsContainerColor(game, p)
     await animationWaitForCompletion(game.run.cardsContainer, 'slide-down', false)
     const selection = await this.getUserInput(game, p, type, msg)
-    if (game.isMultiplayer()) {
+    // Peer broadcast of the pick is only needed when v5.1's multiplayer
+    // inbox is the sync point. In server-auth mode, PICK_PLAY dispatches
+    // the play directly via the Durable Object; a redundant peer
+    // broadcast fills the inbox with stale entries that later confuse
+    // prePlay's receiveInputFromRemote. Coin pick + kick/receive
+    // decision still use the peer path because those happen BEFORE the
+    // server-auth PICK_PLAY loop starts and the host needs to read the
+    // AWAY player's choice to dispatch COIN_TOSS_CALL / RECEIVE_CHOICE.
+    const isServerAuthPlayPick = type === 'reg' &&
+      game.run && typeof game.run._inServerAuthMode === 'function' &&
+      game.run._inServerAuthMode(game)
+    if (game.isMultiplayer() && !isServerAuthPlayPick) {
       await game.run.sendInputToRemote(selection)
-      // await sleep(1)
     }
     await animationWaitForCompletion(game.run.cardsContainer, 'slide-down')
 

@@ -1541,14 +1541,17 @@ export default class Run {
   };
 
   async prePlay (game, stat) {
-    if (game.isMultiplayer()) {
+    // v5.1's peer "pre-play check-in" is a holdover from the pre-server
+    // multiplayer flow. In server-auth mode, the Durable Object is the
+    // synchronization point; this check-in fills the inbox with stale
+    // messages that later confuse receiveInputFromRemote and hang the
+    // game. Skip it when the engine channel is active.
+    if (game.isMultiplayer() && !this._inServerAuthMode(game)) {
       if (game.connection.host) {
         await this.receiveInputFromRemote()
       } else {
         await this.sendInputToRemote('Pre-play check-in. Last play: ' + game.lastPlay)
       }
-      // await this.sendInputToRemote('check-in: ' + (this.transmissions.length + (game.connection.host ? 0 : 1)))
-      // await this.receiveInputFromRemote()
     }
 
     // Autosave
