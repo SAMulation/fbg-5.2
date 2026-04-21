@@ -1,5 +1,5 @@
-/* global Pusher, LZString */
-/* global prompt */
+/* global LZString */
+/* global prompt, alert */
 import Team from './team.js'
 import Game from './game.js'
 import Site from './site.js'
@@ -11,27 +11,13 @@ import { TEAMS } from './teams.js'
 import Utils from './remoteUtils.js'
 import { animationWaitForCompletion, animationWaitThenHide } from './graphics.js'
 import { MODAL_MESSAGES } from './defaults.js'
-// import TOKEN from './config.js'
+import { createOnlinePusher } from './onlineChannel.js'
 const channel = null
 
-// Multiplayer (Pusher) is currently disabled. Skip the whole Pusher init
-// in that mode — the WebSocket transport would still spam 4009 auth errors
-// to the console even with signin() skipped. The `pusher` symbol below is
-// a no-op stub that satisfies the places run.js / game.js reference it.
-const MULTIPLAYER_ENABLED = false
-Pusher.logToConsole = MULTIPLAYER_ENABLED
-
-const pusher = MULTIPLAYER_ENABLED
-  ? (() => {
-      const p = new Pusher('f18497dc97d155f3f978', {
-        userAuthentication: { endpoint: '/.netlify/functions/main/pusher/user-auth' },
-        channelAuthorization: { endpoint: '/.netlify/functions/main/pusher/auth' },
-        cluster: 'us3'
-      })
-      p.signin()
-      return p
-    })()
-  : { subscribe: () => ({ bind: () => {}, trigger: () => {} }), disconnect: () => {} }
+// v6 multiplayer: our own WebSocket relay (server/multiplayer.mjs), wrapped
+// in a Pusher-compatible interface so v5.1's run.js code paths keep working
+// unchanged. Single-player / local double-player never touch it.
+const pusher = createOnlinePusher()
 
 // pusher.bind('pusher:signin_success', (data) => {
 //   channel = pusher.subscribe('private-channel')
@@ -179,6 +165,12 @@ const attachNextEvent = async (site, buttons) => {
         gamecodeInput.value = await navigator.clipboard.readText()
       } else if (val === 'remote-next') {
         site.gamecode = gamecodeInput.value
+        try {
+          await joinOnlineGame(site)
+        } catch (err) {
+          alert('Could not join game: ' + (err.message || err))
+          return
+        }
         await animationWaitThenHide(remoteCodePanel, 'fade')
         await animationWaitForCompletion(team1Panel, 'fade', false)
       } else if (val === 'p1-next') {
@@ -266,17 +258,22 @@ const connections = (site, type) => {
 }
 
 const generateCode = async (site) => {
-  if (site.connectionType === 'host') {
-    site.gamecode = await Utils.randInt(1000, 9999)
-    //  alert("Here's your game code: " + site.gamecode)
-  } else if (site.connectionType === 'remote') {
-    // site.gamecode = prompt('Enter your game code:')
-    // LATER: Make sure to validate this somewhere
-  } else if (site.connectionType === 'computer-host') {
-    site.gamecode = 6969
-  } else if (site.connectionType === 'computer-remote') {
-    site.gamecode = 6969
+  if (site.connectionType === 'host' || site.connectionType === 'computer-host') {
+    // Open a WebSocket to our relay and ask for a room. The returned code
+    // is what the host shares with the remote.
+    const { code } = await pusher.createGame()
+    site.gamecode = code
+  } else if (site.connectionType === 'remote' || site.connectionType === 'computer-remote') {
+    // Remote join is triggered later via joinOnlineGame(site) once the
+    // player has typed/pasted a code.
   }
+}
+
+const joinOnlineGame = async (site) => {
+  const code = String(site.gamecode || '').toUpperCase().trim()
+  if (!code) throw new Error('missing game code')
+  await pusher.joinGame(code)
+  site.gamecode = code
 }
 
 // const submitTeams = async (site, submit) => {
