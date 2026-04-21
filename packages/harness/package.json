@@ -1,0 +1,13 @@
+{
+  "name": "@fbg/harness",
+  "version": "0.0.1",
+  "description": "Headless end-to-end harness for FBG multiplayer. Spawns bot pairs that play real games through the Cloudflare Worker + Durable Object.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "run": "node run.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  }
+}

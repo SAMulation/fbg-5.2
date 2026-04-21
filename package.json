@@ -10,7 +10,8 @@
     "test:engine": "cd packages/engine && npm run test",
     "dev": "npm run build:engine && cd packages/worker && npx wrangler dev",
     "dev:static": "node server-local.js",
-    "deploy": "npm run build:engine && cd packages/worker && npx wrangler deploy"
+    "deploy": "npm run build:engine && cd packages/worker && npx wrangler deploy",
+    "harness": "cd packages/harness && node run.mjs"
   },
   "repository": {
     "type": "git",
