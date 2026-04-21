@@ -247,6 +247,37 @@ export default class Run {
       }
       this.loadingPanelText.innerText = 'Successfully connected to other player!'
       await sleep(500)
+
+      // Server-authoritative setup: once both sides know their teams, the
+      // host INITs a canonical GameState on the Durable Object. Both
+      // clients await the first state broadcast before proceeding.
+      if (this.game.connection.host) {
+        this.channel.sendInit({
+          team1: this.game.players[1].team.abrv,
+          team2: this.game.players[2].team.abrv,
+          quarterLengthMinutes: this.game.qtrLength
+        })
+      }
+      const initial = await this.channel.nextState()
+      this.game.engineState = initial.state
+
+      // Kick the engine from INIT → COIN_TOSS so subsequent server-dispatched
+      // actions (like COIN_TOSS_CALL) are valid. Host drives; remote just
+      // waits for the broadcast.
+      if (this.game.connection.host) {
+        this.channel.dispatchAction({
+          type: 'START_GAME',
+          quarterLengthMinutes: this.game.qtrLength,
+          teams: {
+            1: this.game.players[1].team.abrv,
+            2: this.game.players[2].team.abrv
+          }
+        })
+      }
+      const afterStart = await this.channel.nextState()
+      this.game.engineState = afterStart.state
+      console.log('[server] post-START_GAME state:', afterStart.state.phase)
+
       this.loadingPanelText.innerText = 'Loading game...'
     }
 
@@ -308,6 +339,38 @@ export default class Run {
       }
     }
   };
+
+  /**
+   * Server-authoritative coin toss for online multiplayer. The AWAY player's
+   * call was already collected via input (coinPick 'H'|'T'); the host
+   * dispatches COIN_TOSS_CALL to the DO and both clients await the broadcast.
+   * Returns a truthy value when the flip came up heads (matching the old
+   * Utils.coinFlip(...) contract so the surrounding code doesn't change).
+   *
+   * Falls back to v5.1 peer-to-peer RNG sync for non-multiplayer or when
+   * the server-authoritative channel isn't available.
+   */
+  async _serverCoinFlipOrLocal (game, coinPick) {
+    const serverMode = game.isMultiplayer() &&
+      this.channel &&
+      typeof this.channel.dispatchAction === 'function' &&
+      game.engineState &&
+      game.engineState.phase === 'COIN_TOSS'
+    if (!serverMode) {
+      return await Utils.coinFlip(game, game.me)
+    }
+    if (game.connection.host) {
+      this.channel.dispatchAction({
+        type: 'COIN_TOSS_CALL',
+        player: game.away,
+        call: coinPick === 'H' ? 'heads' : 'tails'
+      })
+    }
+    const { state, events } = await this.channel.nextState()
+    game.engineState = state
+    const result = events.find(e => e.type === 'COIN_TOSS_RESULT')
+    return result && result.result === 'heads'
+  }
 
   // Commented code will handle host/remote random decisions
   async handleRandomDecisions (game, p, result) {
@@ -412,7 +475,7 @@ export default class Run {
     await sleep(2000)
     console.log(game.me + ' actFlip before: ' + actFlip)
 
-    actFlip = await Utils.coinFlip(game, game.me) ? 'H' : 'T'
+    actFlip = await this._serverCoinFlipOrLocal(game, coinPick) ? 'H' : 'T'
     console.log(game.me + ' actFlip after: ' + actFlip)
 
     // Maybe away
@@ -476,6 +539,24 @@ export default class Run {
     game.recFirst = recFirst === 'home' ? game.home : game.away
     game.defNum = game.recFirst // Because they're receiving first
     game.offNum = game.opp(game.defNum) // Because they're kicking
+
+    // Keep the Durable Object's GameState in step with v5.1's local state.
+    // The coin-toss-winning player made a choice; advance the engine to KICKOFF.
+    if (game.isMultiplayer() && this.channel && typeof this.channel.dispatchAction === 'function' &&
+        game.engineState && game.engineState.phase === 'COIN_TOSS') {
+      const winner = actFlip === coinPick ? game.away : game.home
+      const wantsBallFirst = decPick === 'R' || decPick === '1'
+      if (game.connection.host) {
+        this.channel.dispatchAction({
+          type: 'RECEIVE_CHOICE',
+          player: winner,
+          choice: wantsBallFirst ? 'receive' : 'defer'
+        })
+      }
+      const { state } = await this.channel.nextState()
+      game.engineState = state
+      console.log('[server] post-RECEIVE_CHOICE phase:', state.phase, 'offense:', state.field.offense)
+    }
 
     if (game.qtr >= 4) {
       if (game.gameType !== 'otc') {

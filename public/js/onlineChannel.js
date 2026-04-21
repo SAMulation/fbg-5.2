@@ -129,10 +129,56 @@ class OnlineChannel {
       return
     }
 
+    if (msg.type === 'state') {
+      // Server-authoritative broadcast.
+      this._emit('server-state', { state: msg.state, events: msg.events || [] })
+      return
+    }
+
+    if (msg.type === 'error') {
+      this._emit('server-error', msg)
+      return
+    }
+
     if (msg.type === 'peer-disconnected') {
       this.ready = false
       this._emit('pusher:member_removed', {})
     }
+  }
+
+  /**
+   * Server-authoritative dispatch. Sends an engine Action; the DO replies
+   * via 'server-state' broadcast which both clients receive.
+   */
+  dispatchAction (action) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('dispatchAction: socket not open')
+      return
+    }
+    this.ws.send(JSON.stringify({ type: 'action', action }))
+  }
+
+  sendInit (setup) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('sendInit: socket not open')
+      return
+    }
+    this.ws.send(JSON.stringify({ type: 'init', setup }))
+  }
+
+  /**
+   * Returns a promise that resolves with the next 'server-state' broadcast.
+   * Use `await channel.nextState()` after dispatchAction to know when
+   * the DO has applied the reduce.
+   */
+  nextState () {
+    return new Promise((resolve) => {
+      const onOnce = (payload) => {
+        this.unbind('server-state', onOnce)
+        resolve(payload)
+      }
+      this.bind('server-state', onOnce)
+    })
   }
 
   async createGame () {
