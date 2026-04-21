@@ -1,7 +1,7 @@
 /* global Pusher, LZString */
 /* global alert, debugger, plausible */
 
-import Player from './player.js'
+import Player from './player.js' // used in _onlineSetup to rebuild teams from server state
 import Stat from './stat.js'
 import Utils from './remoteUtils.js'
 import { Queue } from './queue.js'
@@ -120,49 +120,9 @@ export default class Run {
     setSpot(this, game.resume ? game.spot : 65) // Place ball
     await setBallSpot(this)
     await this.moveBall(game, game.resume ? 'show' : 'show/clear')
-    // await this.updateDown(game)
-    // alert('Waiting for other game')
-    if (game.isMultiplayer()) {
-      // Initial message
-      // if (game.connection.host) {
-      //   await this.receiveInputFromRemote()
-      //   await this.sendInputToRemote('We good...')
-      // } else {
-      //   await this.sendInputToRemote('Initial check-in... we must trade data')
-      //   await this.receiveInputFromRemote()
-      // }
 
-      // Host gets player 2's team
-      if (game.connection.host && this.p2Team !== 'pong') {
-        game.players[2] = new Player(null, game, JSON.parse(this.p2Team))
-      } else if (game.connection.host) {
-        const team2 = await this.receiveInputFromRemote()
-        console.log(team2)
-        console.log(team2.value)
-        game.players[2] = new Player(null, game, JSON.parse(team2))
-      // Remote
-      } else {
-        await this.sendInputToRemote(JSON.stringify(game.players[1].team))
-      }
-
-      // Remote gets player 1's team and other game info
-      if (game.connection.host) {
-        await this.sendInputToRemote(JSON.stringify({ team: game.players[1].team, qtrlen: game.qtrLength, home: game.home }))
-      } else {
-        let tempData = await this.receiveInputFromRemote()
-        console.log(tempData)
-        tempData = JSON.parse(tempData)
-        // Copy player '1' to actual player 2
-        game.players[2] = new Player(null, game, game.players[1].team)
-        game.players[1] = new Player(null, game, tempData.team)
-        game.qtrLength = parseInt(tempData.qtrlen)
-        game.home = parseInt(tempData.home)
-        game.away = game.opp(game.home)
-        if (game.numberPlayers) {
-          game.me = 2
-        }
-      }
-    }
+    // Teams / game options are now exchanged in _onlineSetup (via the
+    // Durable Object) before prepareHTML runs. Nothing to do here.
 
     // Set teams' colors
     document.documentElement.style.setProperty('--away-color1', game.players[game.away].team.color1)
@@ -196,89 +156,109 @@ export default class Run {
 
   }
 
-  async playGame () {
-    // Pusher channel subscription is only needed for online multiplayer,
-    // which is currently disabled. Single-player / local two-player boot
-    // cleanly without hitting the auth endpoint.
-    if (this.game.isMultiplayer()) {
-      this.channel = this.game.connection.pusher.subscribe('private-game-' + this.game.connection.gamecode)
-      this.channel.bind('client-value', (data) => {
-        if (data.value === null || data.value === undefined) throw new Error('got empty value from remote')
-        this.inbox.enqueue(data.value)
-      })
+  /**
+   * Online multiplayer setup, decoupled from v5.1's peer ping-pong.
+   *
+   * Flow (no "ping" / "pong" involved):
+   *   1. Subscribe to the shared Durable Object channel.
+   *   2. Wait for both clients to be attached (welcome + peer-joined).
+   *   3. Each side emits a `setup` relay with its team + (host-only) game
+   *      options. Both sides collect both setups.
+   *   4. Host dispatches INIT to the DO with both team IDs. Both sides
+   *      receive the initial GameState broadcast and install Player
+   *      objects from it.
+   *   5. Host dispatches START_GAME so the engine transitions
+   *      INIT → COIN_TOSS, ready for the coin-toss flow in gameLoop.
+   *
+   * v5.1's game.players, game.home, game.qtrLength etc are synced from
+   * host-authoritative values. Nothing in this method depends on
+   * receiveInputFromRemote/sendInputToRemote — those become legacy.
+   */
+  async _onlineSetup () {
+    const game = this.game
+    this.channel = game.connection.pusher.subscribe('private-game-' + game.connection.gamecode)
 
-      await new Promise((resolve, reject) => {
-        this.channel.bind('pusher:subscription_succeeded', resolve)
-        this.channel.bind('pusher:subscription_error', reject)
-      })
+    // Peer-to-peer inbox (legacy, kept for any stragglers that still use
+    // it; safe no-op once all paths are DO-driven).
+    this.channel.bind('client-value', (data) => {
+      if (data && data.value !== null && data.value !== undefined) {
+        this.inbox.enqueue(data.value)
+      }
+    })
+
+    this.loadingPanelText.innerText = 'Connecting to channel...'
+    await new Promise((resolve, reject) => {
+      this.channel.bind('pusher:subscription_succeeded', resolve)
+      this.channel.bind('pusher:subscription_error', reject)
+    })
+    this.loadingPanelText.innerText = 'Waiting for other player...'
+
+    // Exchange setup. The OnlineChannel's pending-message buffer ensures
+    // we don't miss the peer's setup even if they send it before we
+    // bound the listener.
+    const myTeam = game.players[1].team
+    const mySetup = game.connection.host
+      ? { team: myTeam, qtrLength: game.qtrLength, home: game.home }
+      : { team: myTeam }
+
+    const theirSetupPromise = new Promise((resolve) => {
+      const onSetup = (data) => {
+        this.channel.unbind('setup', onSetup)
+        resolve(data)
+      }
+      this.channel.bind('setup', onSetup)
+    })
+
+    this.channel.trigger('setup', mySetup)
+    const theirSetup = await theirSetupPromise
+
+    // Normalize both sides to the convention: player 1 = host's team,
+    // player 2 = remote's team.
+    if (game.connection.host) {
+      game.players[2] = new Player(null, game, theirSetup.team)
+    } else {
+      const myOwn = game.players[1].team
+      game.players[1] = new Player(null, game, theirSetup.team)
+      game.players[2] = new Player(null, game, myOwn)
+      if (theirSetup.qtrLength !== undefined) game.qtrLength = parseInt(theirSetup.qtrLength)
+      if (theirSetup.home !== undefined) game.home = parseInt(theirSetup.home)
+      game.away = game.opp(game.home)
+      if (game.numberPlayers) game.me = 2
     }
 
-    // Performing Initial Handshake
+    this.loadingPanelText.innerText = 'Starting game...'
+
+    // Host INITs the Durable Object, creating the canonical GameState.
+    if (game.connection.host) {
+      this.channel.sendInit({
+        team1: game.players[1].team.abrv,
+        team2: game.players[2].team.abrv,
+        quarterLengthMinutes: game.qtrLength
+      })
+    }
+    const initial = await this.channel.nextState()
+    game.engineState = initial.state
+
+    // Transition engine INIT → COIN_TOSS via START_GAME. Only the host
+    // dispatches so the DO doesn't see duplicate actions.
+    if (game.connection.host) {
+      this.channel.dispatchAction({
+        type: 'START_GAME',
+        quarterLengthMinutes: game.qtrLength,
+        teams: {
+          1: game.players[1].team.abrv,
+          2: game.players[2].team.abrv
+        }
+      })
+    }
+    const afterStart = await this.channel.nextState()
+    game.engineState = afterStart.state
+    console.log('[server] setup complete, phase:', afterStart.state.phase)
+  }
+
+  async playGame () {
     if (this.game.isMultiplayer()) {
-      console.log('subscription succeeded')
-      this.loadingPanelText.innerText = 'Successfully connected to channel!'
-      await sleep(500)
-
-      this.loadingPanelText.innerText = 'Waiting for other player...'
-      await sleep(500)
-
-      if (this.game.connection.host) {
-        let response = null
-        let result = []
-        do {
-          await this.sendInputToRemote('ping')
-          console.log('Host sent handshake')
-          await Promise.race([sleep(5000), this.receiveInputFromRemote()]).then(value => {
-            result = value
-            console.log('Race result: ')
-            console.log(result)
-          })
-          if (result) {
-            response = result
-          }
-        } while (!response)
-        this.p2Team = response
-      } else {
-        const handshake = await this.receiveInputFromRemote()
-        console.log('Remote received handshake:')
-        console.log(handshake)
-        await this.sendInputToRemote('pong')
-        console.log('Remote sent confirmation')
-      }
-      this.loadingPanelText.innerText = 'Successfully connected to other player!'
-      await sleep(500)
-
-      // Server-authoritative setup: once both sides know their teams, the
-      // host INITs a canonical GameState on the Durable Object. Both
-      // clients await the first state broadcast before proceeding.
-      if (this.game.connection.host) {
-        this.channel.sendInit({
-          team1: this.game.players[1].team.abrv,
-          team2: this.game.players[2].team.abrv,
-          quarterLengthMinutes: this.game.qtrLength
-        })
-      }
-      const initial = await this.channel.nextState()
-      this.game.engineState = initial.state
-
-      // Kick the engine from INIT → COIN_TOSS so subsequent server-dispatched
-      // actions (like COIN_TOSS_CALL) are valid. Host drives; remote just
-      // waits for the broadcast.
-      if (this.game.connection.host) {
-        this.channel.dispatchAction({
-          type: 'START_GAME',
-          quarterLengthMinutes: this.game.qtrLength,
-          teams: {
-            1: this.game.players[1].team.abrv,
-            2: this.game.players[2].team.abrv
-          }
-        })
-      }
-      const afterStart = await this.channel.nextState()
-      this.game.engineState = afterStart.state
-      console.log('[server] post-START_GAME state:', afterStart.state.phase)
-
-      this.loadingPanelText.innerText = 'Loading game...'
+      await this._onlineSetup()
     }
 
     // Set up environment
@@ -1268,16 +1248,18 @@ export default class Run {
       'FIELD_GOAL_GOOD', 'FIELD_GOAL_MISSED', 'PUNT'
     ])
 
+    // Accumulate events across the drain loop. PLAY_CALLED for each side
+    // may arrive in different broadcasts (offense's dispatch = broadcast A,
+    // defense's dispatch = broadcast B with both PLAY_CALLED{defense} and
+    // PLAY_RESOLVED). After the loop we scan the full set for any picks
+    // we haven't yet reflected onto v5.1's game.players[*].currentPlay.
+    const allEvents = []
     let resolved = null
     while (!resolved) {
       const { state, events } = await this.channel.nextState()
       game.engineState = state
+      allEvents.push(...events)
 
-      const otherCall = events.find(e => e.type === 'PLAY_CALLED' && e.player === otherP)
-      if (otherCall) game.players[otherP].currentPlay = otherCall.play
-
-      // Defense waited; now dispatch if we've seen offense play a regular
-      // card (not FG/PUNT which resolve unilaterally on the server).
       if (!amOffense && !defenseDispatched) {
         const offenseCalled = events.some(e => e.type === 'PLAY_CALLED' && e.player === game.offNum)
         if (offenseCalled) {
@@ -1287,8 +1269,15 @@ export default class Run {
       }
 
       if (events.some(e => RESOLVING_EVENTS.has(e.type))) {
-        resolved = { state, events }
+        resolved = { state, events: allEvents }
       }
+    }
+
+    // Reflect every PLAY_CALLED we saw onto the local Game. Guarantees
+    // currentPlay is non-null for both sides before endPlay runs — otherwise
+    // calcDist → calcTimes throws `bad off play null`.
+    for (const e of allEvents) {
+      if (e.type === 'PLAY_CALLED') game.players[e.player].currentPlay = e.play
     }
 
     await this._applyServerResolution(game, resolved)
@@ -1323,40 +1312,28 @@ export default class Run {
     const isSafety = resolved.events.some(e => e.type === 'SAFETY')
 
     if (fgGood) {
-      game.thisPlay.multiplier = '/'
-      game.thisPlay.multiplierCard = '/'
-      game.thisPlay.yardCard = '/'
-      game.thisPlay.quality = '/'
-      game.thisPlay.dist = 0
+      this._blankThisPlay(game)
       await alertBox(this, game.players[game.offNum].team.name + ' field goal is GOOD!')
-      // Sync authoritative scores, transition to kickoff.
       this._syncScoresFrom(game, resolved.state)
-      if (!game.isOT()) game.status = -3 // pending kickoff
+      // Status out of calcDist / updateDown range so endPlay skips them.
+      game.status = game.isOT() ? REG : -3 // -3 = pending kickoff
       return
     }
 
     if (fgMiss) {
-      game.thisPlay.multiplier = '/'
-      game.thisPlay.multiplierCard = '/'
-      game.thisPlay.yardCard = '/'
-      game.thisPlay.quality = '/'
-      game.thisPlay.dist = 0
+      this._blankThisPlay(game)
       await alertBox(this, game.players[game.offNum].team.name + ' field goal is no good...')
-      // Possession flips per resolveFieldGoal.
       this._syncFieldFrom(game, resolved.state)
+      game.status = FG // status === 15 keeps endPlay out of calcDist/updateDown
       return
     }
 
     if (isPunt && !playEvent) {
-      // Punt or kickoff-style event with no play-card resolution.
-      game.thisPlay.multiplier = '/'
-      game.thisPlay.multiplierCard = '/'
-      game.thisPlay.yardCard = '/'
-      game.thisPlay.quality = '/'
-      game.thisPlay.dist = 0
+      this._blankThisPlay(game)
       await alertBox(this, game.players[game.offNum].team.name + ' punt is away...')
       this._syncFieldFrom(game, resolved.state)
       this._syncScoresFrom(game, resolved.state)
+      game.status = PUNT // status === 16, same reason as FG
       return
     }
 
@@ -1396,6 +1373,14 @@ export default class Run {
   _syncScoresFrom (game, engineState) {
     game.players[1].score = engineState.players[1].score
     game.players[2].score = engineState.players[2].score
+  }
+
+  _blankThisPlay (game) {
+    game.thisPlay.multiplier = '/'
+    game.thisPlay.multiplierCard = '/'
+    game.thisPlay.yardCard = '/'
+    game.thisPlay.quality = '/'
+    game.thisPlay.dist = 0
   }
 
   /**
