@@ -798,13 +798,23 @@ export default class Run {
     game.down = resolved.state.field.down
     game.offNum = resolved.state.field.offense
     game.defNum = game.opp(game.offNum)
-    game.status = REG
+    // v5.1's kickoff leaves status as a positive intermediate (3 or 4)
+    // that endPlay promotes to REG on its tail end. Setting REG directly
+    // would make endPlay's calcDist branch run with null currentPlay and
+    // crash. 3 matches `Math.abs(KICKOFF)` — same behavior as v5.1.
+    game.status = 3
 
     const receiverName = game.players[game.offNum].team.name
     const punt = resolved.events.find(e => e.type === 'PUNT')
     if (punt) {
       await alertBox(this, receiverName + ' take the ball at the ' + this._yardLineLabel(game.spot) + '.')
     }
+
+    // Ensure both players' currentPlay is something non-null before
+    // endPlay runs — the kickoff doesn't involve play picks, but
+    // calcTimes / reportPlay read currentPlay and crash on null.
+    if (!game.players[1].currentPlay) game.players[1].currentPlay = '/'
+    if (!game.players[2].currentPlay) game.players[2].currentPlay = '/'
 
     await setBallSpot(this)
     await firstDownLine(this)
