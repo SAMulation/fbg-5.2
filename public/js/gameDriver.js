@@ -1,15 +1,16 @@
 /**
- * gameDriver.js — the online-multi play loop.
+ * gameDriver.js — THE play loop for all game modes.
  *
  * Drives a full game by reading the engine's GameState phase and
- * dispatching the appropriate action, then animating the result. No
- * touchpoints with v5.1's gameLoop, endPlay, timeChanger, pickPlay,
- * doPlay, calcDist, or reportPlay. Every one of those had hidden
- * assumptions that fought the server-authoritative state.
+ * dispatching the appropriate action, then animating the result. Talks
+ * to a channel-shaped session:
+ *   • online-multi → onlineChannel → Cloudflare DO (server-authoritative)
+ *   • single / double / computer → localSession (engine.reduce in-browser)
  *
- * Used ONLY for online multiplayer (host + remote / computer-host +
- * computer-remote). Single-player and local two-player still run
- * through v5.1's Run.playGame for now; Session 4b collapses those.
+ * Either way, the driver never touches v5.1's gameLoop, endPlay,
+ * timeChanger, pickPlay, doPlay, calcDist, reportPlay, playMechanism,
+ * or gameControl — every one of those carried hidden state assumptions
+ * that fought the engine.
  */
 
 /* global localStorage */
@@ -35,19 +36,28 @@ export class GameDriver {
 
   get me () { return this.game.me }
   get opp () { return this.me === 1 ? 2 : 1 }
-  get host () { return this.game.connection.host }
+  get isLocal () { return !this.game.isMultiplayer() }
+  // For local sessions the driver always dispatches. For online, only the
+  // host dispatches resolver-level actions; the remote only dispatches its
+  // own play-pick.
+  get host () { return this.isLocal ? true : this.game.connection.host }
 
   // ------------- public entry -------------
 
   async run_ () { // can't call it `run` — collides with this.run
     try {
       await this._subscribe()
-      const rejoin = await this._awaitInitialState(400)
-      if (rejoin && rejoin.phase !== 'INIT') {
-        this._applyStateToGame(rejoin)
-        this.state = rejoin
-        console.log('[driver] rejoined at phase:', rejoin.phase)
-      } else {
+      let didRejoin = false
+      if (!this.isLocal) {
+        const rejoin = await this._awaitInitialState(400)
+        if (rejoin && rejoin.phase !== 'INIT') {
+          this._applyStateToGame(rejoin)
+          this.state = rejoin
+          didRejoin = true
+          console.log('[driver] rejoined at phase:', rejoin.phase)
+        }
+      }
+      if (!didRejoin) {
         await this._setupFresh()
       }
 
@@ -67,22 +77,26 @@ export class GameDriver {
 
   async _subscribe () {
     this.channel = this.game.connection.pusher.subscribe(
-      'private-game-' + this.game.connection.gamecode
+      'private-game-' + (this.game.connection.gamecode || 'local')
     )
-    this.run.channel = this.channel // v5.1 bits still reference run.channel
+    this.run.channel = this.channel
 
-    // Legacy relay inbox — harmless; nothing in the driver reads it.
-    this.channel.bind('client-value', (data) => {
-      if (data && data.value !== null && data.value !== undefined) {
-        this.run.inbox.enqueue(data.value)
+    if (!this.isLocal) {
+      // Legacy relay inbox — harmless; nothing in the driver reads it.
+      this.channel.bind('client-value', (data) => {
+        if (data && data.value !== null && data.value !== undefined) {
+          this.run.inbox.enqueue(data.value)
+        }
+      })
+
+      if (this.run.loadingPanelText) {
+        this.run.loadingPanelText.innerText = 'Connecting to channel...'
       }
-    })
-
-    this.run.loadingPanelText.innerText = 'Connecting to channel...'
-    await new Promise((resolve, reject) => {
-      this.channel.bind('pusher:subscription_succeeded', resolve)
-      this.channel.bind('pusher:subscription_error', reject)
-    })
+      await new Promise((resolve, reject) => {
+        this.channel.bind('pusher:subscription_succeeded', resolve)
+        this.channel.bind('pusher:subscription_error', reject)
+      })
+    }
   }
 
   async _awaitInitialState (ms) {
@@ -106,38 +120,39 @@ export class GameDriver {
 
   async _setupFresh () {
     const game = this.game
-    this.run.loadingPanelText.innerText = 'Waiting for other player...'
 
-    // Relay team + game options to the peer. Both sides do this in
-    // parallel; the OnlineChannel's pending-message buffer keeps
-    // anything that arrives before we've bound a handler.
-    const mySetup = this.host
-      ? { team: game.players[1].team, qtrLength: game.qtrLength, home: game.home }
-      : { team: game.players[1].team }
+    if (!this.isLocal) {
+      this.run.loadingPanelText.innerText = 'Waiting for other player...'
 
-    const theirSetupPromise = new Promise((resolve) => {
-      const onSetup = (data) => {
-        this.channel.unbind('setup', onSetup)
-        resolve(data)
+      // Relay team + game options to the peer.
+      const mySetup = this.host
+        ? { team: game.players[1].team, qtrLength: game.qtrLength, home: game.home }
+        : { team: game.players[1].team }
+
+      const theirSetupPromise = new Promise((resolve) => {
+        const onSetup = (data) => {
+          this.channel.unbind('setup', onSetup)
+          resolve(data)
+        }
+        this.channel.bind('setup', onSetup)
+      })
+      this.channel.trigger('setup', mySetup)
+      const theirSetup = await theirSetupPromise
+
+      if (this.host) {
+        game.players[2] = new Player(null, game, theirSetup.team)
+      } else {
+        const myOwn = game.players[1].team
+        game.players[1] = new Player(null, game, theirSetup.team)
+        game.players[2] = new Player(null, game, myOwn)
+        if (theirSetup.qtrLength !== undefined) game.qtrLength = parseInt(theirSetup.qtrLength)
+        if (theirSetup.home !== undefined) game.home = parseInt(theirSetup.home)
+        game.away = game.opp(game.home)
+        if (game.numberPlayers) game.me = 2
       }
-      this.channel.bind('setup', onSetup)
-    })
-    this.channel.trigger('setup', mySetup)
-    const theirSetup = await theirSetupPromise
 
-    if (this.host) {
-      game.players[2] = new Player(null, game, theirSetup.team)
-    } else {
-      const myOwn = game.players[1].team
-      game.players[1] = new Player(null, game, theirSetup.team)
-      game.players[2] = new Player(null, game, myOwn)
-      if (theirSetup.qtrLength !== undefined) game.qtrLength = parseInt(theirSetup.qtrLength)
-      if (theirSetup.home !== undefined) game.home = parseInt(theirSetup.home)
-      game.away = game.opp(game.home)
-      if (game.numberPlayers) game.me = 2
+      this.run.loadingPanelText.innerText = 'Starting game...'
     }
-
-    this.run.loadingPanelText.innerText = 'Starting game...'
 
     if (this.host) {
       this.channel.sendInit({
@@ -239,7 +254,6 @@ export class GameDriver {
 
   async _doKickoff () {
     const game = this.game
-    // Reset board for the kick.
     game.down = 0
     game.firstDown = 0
     this.run.playerContainer.classList.toggle('fade', true)
@@ -264,30 +278,18 @@ export class GameDriver {
     this.run.printMsgDown(game, this.run.scoreboardContainer)
     this.run.printMsgSpot(game, this.run.scoreboardContainer)
 
-    // Seed currentPlay with placeholders so animator/reset paths that
-    // stringify them don't barf on null.
     game.players[1].currentPlay = '/'
     game.players[2].currentPlay = '/'
   }
 
   async _doPlay () {
-    const game = this.game
-    resetBoardContainer(this.run)
-    game.players[1].currentPlay = null
-    game.players[2].currentPlay = null
-    game.thisPlay.multiplierCard = null
-    game.thisPlay.yardCard = null
-    game.thisPlay.multiplier = null
-    game.thisPlay.quality = null
-    game.thisPlay.dist = null
-    game.thisPlay.bonus = 0
+    if (this.isLocal) return this._doPlayLocal()
+    return this._doPlayOnline()
+  }
 
-    // Defensive: prepareAndGetUserInput awaits a slide-down REMOVE; force
-    // the class on if it's drifted off, otherwise the await hangs.
-    if (!this.run.cardsContainer.classList.contains('slide-down')) {
-      this.run.cardsContainer.classList.add('slide-down')
-      await sleep(50)
-    }
+  async _doPlayOnline () {
+    const game = this.game
+    this._resetPlayUI()
 
     console.log('[driver] awaiting local pick p=' + this.me)
     const myPlay = await this.run.input.getInput(
@@ -336,36 +338,109 @@ export class GameDriver {
       }
     }
 
-    // Populate currentPlay from the combined PLAY_CALLED events so the
-    // animator + any other consumers have both picks to display.
+    await this._animateAndScore(resolved.events, resolved.state)
+    await this._tickClock(30)
+  }
+
+  async _doPlayLocal () {
+    const game = this.game
+    this._resetPlayUI()
+
+    const offense = this.state.field.offense
+    const defense = offense === 1 ? 2 : 1
+
+    // Offense picks first.
+    console.log('[driver-local] awaiting offense (p' + offense + ')')
+    const offPlay = await this.run.input.getInput(
+      game, offense, 'reg',
+      game.players[offense].team.name + ' pick your play...'
+    )
+    console.log('[driver-local] offense picked =', offPlay)
+    game.players[offense].currentPlay = offPlay
+
+    // Fourth-down special choices short-circuit — they don't need a defense pick.
+    if (offPlay === 'FG' || offPlay === 'PUNT') {
+      this.channel.dispatchAction({
+        type: 'FOURTH_DOWN_CHOICE', player: offense, choice: offPlay.toLowerCase()
+      })
+      const allEvents = await this._drainUntilResolved()
+      await this._animateAndScore(allEvents, this.state)
+      await this._tickClock(30)
+      return
+    }
+
+    // Dispatch offense PICK_PLAY — engine stashes it in pendingPick; first
+    // broadcast carries PLAY_CALLED for the offense but no resolution yet.
+    this.channel.dispatchAction({ type: 'PICK_PLAY', player: offense, play: offPlay })
+    const first = await this._nextState()
+    const preEvents = first.events
+
+    // Now defense.
+    console.log('[driver-local] awaiting defense (p' + defense + ')')
+    const defPlay = await this.run.input.getInput(
+      game, defense, 'reg',
+      game.players[defense].team.name + ' pick your play...'
+    )
+    console.log('[driver-local] defense picked =', defPlay)
+    game.players[defense].currentPlay = defPlay
+
+    this.channel.dispatchAction({ type: 'PICK_PLAY', player: defense, play: defPlay })
+    const rest = await this._drainUntilResolved()
+    const allEvents = [...preEvents, ...rest]
+
+    await this._animateAndScore(allEvents, this.state)
+    await this._tickClock(30)
+  }
+
+  _resetPlayUI () {
+    const game = this.game
+    resetBoardContainer(this.run)
+    game.players[1].currentPlay = null
+    game.players[2].currentPlay = null
+    game.thisPlay.multiplierCard = null
+    game.thisPlay.yardCard = null
+    game.thisPlay.multiplier = null
+    game.thisPlay.quality = null
+    game.thisPlay.dist = null
+    game.thisPlay.bonus = 0
+
+    // Defensive: prepareAndGetUserInput awaits a slide-down REMOVE; force
+    // the class on if it's drifted off, otherwise the await hangs.
+    if (!this.run.cardsContainer.classList.contains('slide-down')) {
+      this.run.cardsContainer.classList.add('slide-down')
+    }
+  }
+
+  async _drainUntilResolved () {
+    const allEvents = []
+    while (true) {
+      const { state, events } = await this._nextState()
+      allEvents.push(...events)
+      console.log('[driver] broadcast:', events.map(e => e.type).join(','))
+      const hasTerminal = events.some(e => TERMINAL_EVENTS.has(e.type))
+      const pendingCleared = !state.pendingPick.offensePlay &&
+                             !state.pendingPick.defensePlay &&
+                             events.some(e => e.type === 'PLAY_CALLED')
+      if (hasTerminal || pendingCleared) return allEvents
+    }
+  }
+
+  async _animateAndScore (allEvents, stateAtEnd) {
+    const game = this.game
     for (const e of allEvents) {
       if (e.type === 'PLAY_CALLED') game.players[e.player].currentPlay = e.play
     }
+    this._applyStateToGame(stateAtEnd || this.state)
+    await animateResolution(this.run, game, allEvents, this.state)
 
-    this._applyStateToGame(resolved.state)
-    await animateResolution(this.run, game, allEvents, resolved.state)
-
-    // Scoring animations (the v5.1 endPlay → checkScore path is skipped
-    // in the driver; trigger them manually from the event stream here).
     const tdEvent = allEvents.find((e) => e.type === 'TOUCHDOWN')
     const safetyEvent = allEvents.find((e) => e.type === 'SAFETY')
     const fgGood = allEvents.find((e) => e.type === 'FIELD_GOAL_GOOD')
     const twoGood = allEvents.find((e) => e.type === 'TWO_POINT_GOOD')
-    if (tdEvent) {
-      await this.run.scoreChange(game, tdEvent.scoringPlayer, 6)
-    }
-    if (safetyEvent) {
-      await this.run.scoreChange(game, safetyEvent.scoringPlayer, 2)
-    }
-    if (fgGood) {
-      await this.run.scoreChange(game, fgGood.player, 3)
-    }
-    if (twoGood) {
-      await this.run.scoreChange(game, twoGood.player, 2)
-    }
-
-    // Tick the clock so the engine's quarter/half/game-over transitions fire.
-    await this._tickClock(30)
+    if (tdEvent) await this.run.scoreChange(game, tdEvent.scoringPlayer, 6)
+    if (safetyEvent) await this.run.scoreChange(game, safetyEvent.scoringPlayer, 2)
+    if (fgGood) await this.run.scoreChange(game, fgGood.player, 3)
+    if (twoGood) await this.run.scoreChange(game, twoGood.player, 2)
   }
 
   async _doPat () {
@@ -374,9 +449,10 @@ export class GameDriver {
     const amOffense = this.me === offense
 
     let choice = 'kick'
-    if (amOffense) {
+    // Local: driver always prompts the offense (who may be CPU).
+    // Online: only the client that IS the offense prompts & dispatches.
+    if (this.isLocal || amOffense) {
       if (game.qtr >= 7) {
-        // Forced 2pt in 3OT+ — no UI prompt.
         choice = 'two_point'
       } else {
         const sel = await this.run.input.getInput(
@@ -395,7 +471,6 @@ export class GameDriver {
       await this.run.fgAnimation(game, 22, true)
       await this.run.scoreChange(game, offense, 1)
     }
-    // 2pt goes into TWO_PT_CONV phase; main loop picks it up.
   }
 
   async _doOTStart () {
@@ -487,6 +562,7 @@ export class GameDriver {
   }
 
   _stashResumeToken () {
+    if (this.isLocal) return
     try {
       localStorage.setItem('fbg:onlineResume', JSON.stringify({
         code: this.game.connection.gamecode,

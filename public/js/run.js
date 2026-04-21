@@ -366,21 +366,11 @@ export default class Run {
   }
 
   async playGame () {
-    // Session 4a: online multiplayer runs through a dedicated driver that
-    // owns the full loop (no gameLoop / endPlay / timeChanger / pickPlay /
-    // doPlay from v5.1). Single-player and local double-player still use
-    // v5.1's path below until Session 4b collapses those too.
-    if (this.game.isMultiplayer()) {
-      const driver = new GameDriver(this, this.game)
-      await driver.run_()
-      return
-    }
-
-    // Set up environment
-    await this.prepareHTML(this.game) // Set up game board and field
-
-    // Load game up
-    await this.gameLoop(this.game, this.game.status) // Start the game loop
+    // Session 4b: ALL modes now run through GameDriver. Online multi talks
+    // to the DO; local modes (single / double / computer) talk to an
+    // in-browser engine.reduce wrapper via localSession.
+    const driver = new GameDriver(this, this.game)
+    await driver.run_()
   };
 
   async gameLoop (game, test = REG) {

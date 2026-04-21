@@ -12,12 +12,19 @@ import Utils from './remoteUtils.js'
 import { animationWaitForCompletion, animationWaitThenHide } from './graphics.js'
 import { MODAL_MESSAGES } from './defaults.js'
 import { createOnlinePusher } from './onlineChannel.js'
+import { createLocalPusher } from './localSession.js'
 const channel = null
 
-// v6 multiplayer: our own WebSocket relay (server/multiplayer.mjs), wrapped
-// in a Pusher-compatible interface so v5.1's run.js code paths keep working
-// unchanged. Single-player / local double-player never touch it.
-const pusher = createOnlinePusher()
+// Online multi rides on the Cloudflare DO via onlineChannel; local modes
+// (single / double / computer) use the same channel surface, but the
+// "server" is an in-browser engine.reduce wrapper. The GameDriver is the
+// sole consumer of either. The actual pusher is chosen in initGame based
+// on site.connectionType.
+const onlinePusher = createOnlinePusher()
+const localPusher = createLocalPusher()
+
+const isOnlineType = (t) => t === 'host' || t === 'remote' || t === 'computer-host' || t === 'computer-remote'
+const pusherFor = (t) => (isOnlineType(t) ? onlinePusher : localPusher)
 
 // pusher.bind('pusher:signin_success', (data) => {
 //   channel = pusher.subscribe('private-channel')
@@ -261,7 +268,7 @@ const generateCode = async (site) => {
   if (site.connectionType === 'host' || site.connectionType === 'computer-host') {
     // Open a WebSocket to our relay and ask for a room. The returned code
     // is what the host shares with the remote.
-    const { code } = await pusher.createGame()
+    const { code } = await onlinePusher.createGame()
     site.gamecode = code
   } else if (site.connectionType === 'remote' || site.connectionType === 'computer-remote') {
     // Remote join is triggered later via joinOnlineGame(site) once the
@@ -272,7 +279,7 @@ const generateCode = async (site) => {
 const joinOnlineGame = async (site) => {
   const code = String(site.gamecode || '').toUpperCase().trim()
   if (!code) throw new Error('missing game code')
-  await pusher.joinGame(code)
+  await onlinePusher.joinGame(code)
   site.gamecode = code
 }
 
@@ -376,6 +383,7 @@ const initGame = (site) => {
 
   // }
 
+  const pusher = pusherFor(site.connectionType)
   if (site.connectionType === 'resume') {
     return new Game(LZString.decompressFromUTF16(window.localStorage.getItem('savedGame')), { gamecode: site.gamecode, pusher })
   } else {
