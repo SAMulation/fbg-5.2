@@ -22,6 +22,7 @@ import {
 import { buildEngineState, replayRng } from './engineBridge.js'
 import { canResolveRegularViaEngine, resolveRegularViaEngine } from './engineRunner.js'
 import { animateResolution } from './animator.js'
+import { GameDriver } from './gameDriver.js'
 import { alertBox, sleep, setBallSpot, setSpot, animationSimple, animationWaitForCompletion, animationWaitThenHide, animationPrePick, animationPostPick, resetBoardContainer, firstDownLine } from './graphics.js'
 
 export default class Run {
@@ -365,8 +366,14 @@ export default class Run {
   }
 
   async playGame () {
+    // Session 4a: online multiplayer runs through a dedicated driver that
+    // owns the full loop (no gameLoop / endPlay / timeChanger / pickPlay /
+    // doPlay from v5.1). Single-player and local double-player still use
+    // v5.1's path below until Session 4b collapses those too.
     if (this.game.isMultiplayer()) {
-      await this._onlineSetup()
+      const driver = new GameDriver(this, this.game)
+      await driver.run_()
+      return
     }
 
     // Set up environment
