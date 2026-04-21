@@ -62,9 +62,15 @@ jobs:
         run: npm run build:engine
 
       # ─── Deploy to Cloudflare ────────────────────────────────────────
+      # account_id is pinned in wrangler.toml AND passed via env so this
+      # works regardless of which mechanism wrangler-action's bundled
+      # wrangler version honors. Account IDs are not secrets.
       - name: Deploy Worker + Durable Object + static assets
         uses: cloudflare/wrangler-action@v3
+        env:
+          CLOUDFLARE_ACCOUNT_ID: 11a15d968a6aefccfcd9e6dabb7be231
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 11a15d968a6aefccfcd9e6dabb7be231
           workingDirectory: packages/worker
           command: deploy
