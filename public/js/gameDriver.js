@@ -13,7 +13,7 @@
  * that fought the engine.
  */
 
-/* global localStorage */
+/* global localStorage, location, history */
 import { alertBox, sleep, setBallSpot, firstDownLine, resetBoardContainer } from './graphics.js'
 import Player from './player.js'
 import Team from './team.js'
@@ -92,6 +92,18 @@ export class GameDriver {
         }
       })
 
+      // Chat relay.
+      if (typeof this.channel.bindChat === 'function') {
+        this.channel.bindChat(({ from, text }) => {
+          this.run.appendChatMessage(from, text)
+        })
+        this.run.initChat((text) => {
+          const nick = this.game.connection.nickname || 'Player'
+          this.channel.sendChat(text, nick)
+          this.run.appendChatMessage(nick, text, true)
+        })
+      }
+
       if (this.run.loadingPanelText) {
         this.run.loadingPanelText.innerText = 'Connecting to channel...'
       }
@@ -128,9 +140,10 @@ export class GameDriver {
       this.run.loadingPanelText.innerText = 'Waiting for other player...'
 
       // Relay team + game options to the peer.
+      const myNick = game.connection.nickname || ''
       const mySetup = this.host
-        ? { team: game.players[1].team, qtrLength: game.qtrLength, home: game.home }
-        : { team: game.players[1].team }
+        ? { team: game.players[1].team, qtrLength: game.qtrLength, home: game.home, nickname: myNick }
+        : { team: game.players[1].team, nickname: myNick }
 
       const theirSetupPromise = new Promise((resolve) => {
         const onSetup = (data) => {
@@ -144,10 +157,14 @@ export class GameDriver {
 
       if (this.host) {
         game.players[2] = new Player(null, game, theirSetup.team)
+        game.players[1].nickname = myNick
+        game.players[2].nickname = theirSetup.nickname || ''
       } else {
         const myOwn = game.players[1].team
         game.players[1] = new Player(null, game, theirSetup.team)
         game.players[2] = new Player(null, game, myOwn)
+        game.players[1].nickname = theirSetup.nickname || ''
+        game.players[2].nickname = myNick
         if (theirSetup.qtrLength !== undefined) game.qtrLength = parseInt(theirSetup.qtrLength)
         if (theirSetup.home !== undefined) game.home = parseInt(theirSetup.home)
         game.away = game.opp(game.home)
@@ -155,6 +172,9 @@ export class GameDriver {
       }
 
       this.run.loadingPanelText.innerText = 'Starting game...'
+    } else {
+      // Local modes: player 1 gets the stored nickname; player 2 is CPU/P2.
+      game.players[1].nickname = game.connection.nickname || ''
     }
 
     if (this.host) {
@@ -263,17 +283,60 @@ export class GameDriver {
     game.spot = 65
     await setBallSpot(this.run)
 
-    await alertBox(this.run, game.players[game.offNum].team.name + ' kicking off...')
+    const kicker = this.state.field.offense
+    const returner = kicker === 1 ? 2 : 1
+    const kickerName = game.players[kicker].team.name
+    const returnerName = game.players[returner].team.name
+
+    await alertBox(this.run, kickerName + ' kicking off...')
+
+    // Safety kicks skip the picks — engine uses the simplified punt path.
+    let kickType = null
+    let returnType = null
+    if (!this.state.isSafetyKick) {
+      kickType = await this.run.input.getInput(
+        game, kicker, 'kick',
+        kickerName + ' pick your kick...'
+      )
+      // 'TO' from the timeout button → default to Regular Kick.
+      if (kickType === 'TO') kickType = 'RK'
+
+      await alertBox(this.run, returnerName + ' setting up to return...')
+
+      returnType = await this.run.input.getInput(
+        game, returner, 'ret',
+        returnerName + ' pick your return...'
+      )
+      if (returnType === 'TO') returnType = 'RR'
+    }
+
     if (this.host) {
-      this.channel.dispatchAction({ type: 'RESOLVE_KICKOFF' })
+      const action = { type: 'RESOLVE_KICKOFF' }
+      if (kickType) action.kickType = kickType
+      if (returnType) action.returnType = returnType
+      this.channel.dispatchAction(action)
     }
     const { state, events } = await this._nextState()
     this._applyStateToGame(state)
 
-    const receiverName = game.players[game.offNum].team.name
+    const receivingTeamName = game.players[game.offNum].team.name
+    const tb = events.find(e => e.type === 'TOUCHBACK')
+    const onside = events.find(e => e.type === 'ONSIDE_KICK')
+    const returnEv = events.find(e => e.type === 'KICKOFF_RETURN')
     const punt = events.find(e => e.type === 'PUNT')
-    if (punt) {
-      await alertBox(this.run, receiverName + ' take the ball at the ' + this._yardLineLabel(game.spot) + '.')
+
+    if (tb) {
+      await alertBox(this.run, 'Touchback — ' + receivingTeamName + ' at the 25.')
+    } else if (onside) {
+      if (onside.recovered) {
+        await alertBox(this.run, kickerName + ' RECOVER the onside kick!')
+      } else {
+        await alertBox(this.run, returnerName + ' recover the onside kick.')
+      }
+    } else if (returnEv) {
+      await alertBox(this.run, receivingTeamName + ' return ' + returnEv.yards + ' yards.')
+    } else if (punt) {
+      await alertBox(this.run, receivingTeamName + ' take the ball at the ' + this._yardLineLabel(game.spot) + '.')
     }
 
     await setBallSpot(this.run)
@@ -564,6 +627,49 @@ export class GameDriver {
     const s2 = state.players[2].score
     await alertBox(this.run, winnerName + ' win ' + Math.max(s1, s2) + ' - ' + Math.min(s1, s2) + '!')
     this._clearResumeToken()
+
+    if (!this.isLocal) {
+      await this._offerRematch()
+    }
+  }
+
+  async _offerRematch () {
+    const wantsRematch = await this.run.showRematchPrompt()
+    if (!wantsRematch) {
+      // Navigate to home for a fresh start.
+      location.href = '/'
+      return
+    }
+
+    const pusher = this.game.connection.pusher
+    if (this.host) {
+      // Create a new DO room and tell the remote the new code.
+      const { code } = await pusher.createGame()
+      this.game.connection.gamecode = code
+      history.replaceState(null, '', '/?join=' + encodeURIComponent(code))
+      this.channel.trigger('rematch', { code })
+    } else {
+      // Wait for the host's rematch relay with the new code.
+      const { code } = await new Promise((resolve) => {
+        const onRematch = (data) => {
+          this.channel.unbind('rematch', onRematch)
+          resolve(data)
+        }
+        this.channel.bind('rematch', onRematch)
+      })
+      await pusher.joinGame(code)
+    }
+
+    // Re-subscribe on the new channel and play again.
+    await this._subscribe()
+    await this._setupFresh()
+    await this.run.prepareHTML(this.game)
+
+    // Reset phase so the outer run_() loop continues.
+    while (this.state.phase !== 'GAME_OVER') {
+      await this._driveOne()
+    }
+    await this._handleGameOver()
   }
 
   // ------------- helpers -------------

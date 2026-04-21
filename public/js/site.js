@@ -15,6 +15,7 @@ export default class Site {
     this.gameMode = 'rookie' // or 'pro'
     this.me = 1 // or 2 or 0
     this.animation = true // or false
+    this.nickname = '' // stored in localStorage as fbg:nickname
   }
 
   get host () {

@@ -147,6 +147,10 @@
         </section>
         <section class="start-screen-content login">
           <section class="start-screen-login">
+            <div class="nickname-wrap">
+              <label class="nickname-label" for="nickname-input">Your name</label>
+              <input id="nickname-input" class="nickname-input" type="text" maxlength="16" placeholder="Player 1" autocomplete="off">
+            </div>
             <button class="setup-button login-button" data-button-value="login">Ready for some football?</button>
             <p class="contact">This is still very much a work in progress...</p>
             <!-- <p class="contact">To learn more or reach out: <a href="mailto:footbored.dev@gmail.com">Email</a> | <a href="https://github.com/SAMulation/fbg-5.1" target="_blank" rel="noopener noreferrer">GitHub</a> | <a href="https://www.linkedin.com/in/sam-sarsten/" target="_blank" rel="noopener noreferrer">LinkedIn</a></p> -->
@@ -169,10 +173,11 @@
             <button class="setup-button single-button" data-button-value="remote">I have a game code</button>
           </section>
           <section class="start-screen-host-code fade">
-            <p class="game-code">Here is your game code: <span>0000</span></p>
-            <button class="setup-button" data-button-value="sms">Tap to text friend</button>
-            <button class="setup-button single-button" data-button-value="copy">Tap to copy code</button>
-            <button class="setup-button" data-button-value="host-next">Tap after inviting...</button>
+            <p class="game-code">Your game code: <span>0000</span></p>
+            <p class="join-url"></p>
+            <button class="setup-button" data-button-value="share">Share invite link</button>
+            <button class="setup-button single-button" data-button-value="copy">Copy invite link</button>
+            <button class="setup-button" data-button-value="host-next">Continue after sharing...</button>
           </section>
           <section class="start-screen-remote-code fade">
             <label>Enter your gamecode below:</label>
@@ -979,6 +984,10 @@
             Pause
           </button>
         </div>
+        <div class="rematch-bar hidden">
+          <button class="rematch-btn setup-button">Rematch</button>
+          <button class="newgame-btn setup-button single-button">New Game</button>
+        </div>
         <div class="cards">
           <button class="card SR">
             SR
@@ -1069,6 +1078,17 @@
         </svg>
 
       </section>
+
+      <div class="chat-tray hidden">
+        <button class="chat-toggle" type="button">Chat <span class="chat-badge">0</span></button>
+        <div class="chat-body">
+          <ul class="chat-messages"></ul>
+          <form class="chat-input-form">
+            <input class="chat-input" type="text" maxlength="120" placeholder="Say something..." autocomplete="off">
+            <button type="submit" class="chat-send">Send</button>
+          </form>
+        </div>
+      </div>
     </div>
 </body>
 </html>

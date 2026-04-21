@@ -17,7 +17,7 @@
 
 import type { Action } from "./actions.js";
 import type { Event } from "./events.js";
-import type { GameState } from "./types.js";
+import type { GameState, KickType, ReturnType } from "./types.js";
 import type { Rng } from "./rng.js";
 import { isRegularPlay, resolveRegularPlay } from "./rules/play.js";
 import {
@@ -118,7 +118,10 @@ function reduceCore(state: GameState, action: Action, rng: Rng): ReduceResult {
     }
 
     case "RESOLVE_KICKOFF": {
-      const result = resolveKickoff(state, rng);
+      const opts: { kickType?: KickType; returnType?: ReturnType } = {};
+      if (action.kickType) opts.kickType = action.kickType;
+      if (action.returnType) opts.returnType = action.returnType;
+      const result = resolveKickoff(state, rng, opts);
       return { state: result.state, events: result.events };
     }
 

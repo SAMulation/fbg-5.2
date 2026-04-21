@@ -6,7 +6,7 @@
  * from clients; clients never mutate state directly.
  */
 
-import type { PlayCall, PlayerId } from "./types.js";
+import type { KickType, PlayCall, PlayerId, ReturnType } from "./types.js";
 
 export type Action =
   | { type: "START_GAME"; quarterLengthMinutes: number; teams: { 1: string; 2: string } }
@@ -22,8 +22,15 @@ export type Action =
   /**
    * Resolve the current kickoff. Orchestrator sends this after entering the
    * KICKOFF phase. Engine runs the kickoff mechanic and transitions to REG_PLAY.
+   *
+   * If `kickType` and `returnType` are provided, uses v5.1 picks math. If
+   * omitted, falls back to the simplified safety-kick punt path.
    */
-  | { type: "RESOLVE_KICKOFF" }
+  | {
+      type: "RESOLVE_KICKOFF";
+      kickType?: KickType;
+      returnType?: ReturnType;
+    }
   /**
    * Begin the next OT possession (or first possession of a new OT period).
    * Sent by the orchestrator after entering OT_START phase or after the

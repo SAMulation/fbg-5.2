@@ -59,6 +59,18 @@ export const randomStrategy = {
     if (type === 'coin') return Math.random() < 0.5 ? 'H' : 'T'
     if (type === 'kickDecReg') return Math.random() < 0.5 ? 'R' : 'K'
     if (type === 'kickDecOT') return Math.random() < 0.5 ? '1' : '2'
+    if (type === 'kick') {
+      const r = Math.random()
+      if (r < 0.7) return 'RK'
+      if (r < 0.85) return 'OK'
+      return 'SK'
+    }
+    if (type === 'ret') {
+      const r = Math.random()
+      if (r < 0.7) return 'RR'
+      if (r < 0.85) return 'OR'
+      return 'TB'
+    }
     return null
   }
 }
@@ -75,6 +87,8 @@ export const alwaysShortRunStrategy = {
     if (type === 'coin') return 'H'
     if (type === 'kickDecReg') return 'R'
     if (type === 'kickDecOT') return '1'
+    if (type === 'kick') return 'RK'
+    if (type === 'ret') return 'RR'
     return null
   }
 }

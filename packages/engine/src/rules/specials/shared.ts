@@ -56,6 +56,7 @@ export function applySafety(
       players: newPlayers,
       pendingPick: blankPick(),
       phase: "KICKOFF",
+      isSafetyKick: true,
     },
     events,
   };

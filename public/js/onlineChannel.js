@@ -213,6 +213,14 @@ class OnlineChannel {
     })
   }
 
+  sendChat (text, nickname) {
+    this.trigger('chat', { text, from: nickname || 'Player', ts: Date.now() })
+  }
+
+  bindChat (cb) {
+    this.bind('chat', cb)
+  }
+
   disconnect () {
     if (this.ws) this.ws.close()
     this.ws = null

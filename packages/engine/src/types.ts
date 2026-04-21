@@ -11,6 +11,11 @@ export type RegularPlay = "SR" | "LR" | "SP" | "LP";
 export type SpecialPlay = "TP" | "HM" | "FG" | "PUNT" | "TWO_PT";
 export type PlayCall = RegularPlay | SpecialPlay;
 
+/** Kicker's kickoff selection: Regular, Onside, Squib. */
+export type KickType = "RK" | "OK" | "SK";
+/** Returner's kickoff selection: Regular Return, Onside counter, Touchback. */
+export type ReturnType = "RR" | "OR" | "TB";
+
 export type GamePhase =
   | "INIT"
   | "COIN_TOSS"
@@ -112,6 +117,12 @@ export interface GameState {
    * Engine produces, consumer trims as needed.
    */
   lastPlayDescription: string;
+  /**
+   * True when the current pending kickoff (phase=KICKOFF) is a free kick
+   * after a safety. Safety kicks skip the kick-type / return-type picks
+   * and resolve via the simplified punt path. Cleared when kickoff resolves.
+   */
+  isSafetyKick: boolean;
   /** Schema version — bump when GameState shape changes. */
   schemaVersion: 1;
 }

@@ -65,6 +65,79 @@ export default class Run {
     this.transmissions = []
     this.gameLog = []
     this.p2Team = ''
+    this.chatTray = document.querySelector('.chat-tray')
+    this.chatMessages = document.querySelector('.chat-messages')
+    this.chatBadge = document.querySelector('.chat-badge')
+    this.chatInput = document.querySelector('.chat-input')
+    this.chatToggle = document.querySelector('.chat-toggle')
+    this._chatUnread = 0
+    this._chatOpen = false
+    this.rematchBar = document.querySelector('.rematch-bar')
+    this.rematchBtn = document.querySelector('.rematch-btn')
+    this.newgameBtn = document.querySelector('.newgame-btn')
+  }
+
+  // -------------------- chat --------------------
+
+  initChat (onSend) {
+    if (!this.chatTray) return
+    this.chatTray.classList.remove('hidden')
+    this.chatTray.classList.add('collapsed')
+
+    this.chatToggle.addEventListener('click', () => {
+      this._chatOpen = !this._chatOpen
+      this.chatTray.classList.toggle('collapsed', !this._chatOpen)
+      if (this._chatOpen) {
+        this._chatUnread = 0
+        this.chatBadge.textContent = '0'
+        this.chatBadge.classList.add('zero')
+        this.chatInput.focus()
+      }
+    })
+
+    const form = document.querySelector('.chat-input-form')
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      const text = this.chatInput.value.trim()
+      if (!text) return
+      this.chatInput.value = ''
+      onSend(text)
+    })
+  }
+
+  appendChatMessage (from, text, isMine = false) {
+    if (!this.chatMessages) return
+    const li = document.createElement('li')
+    li.textContent = (isMine ? 'You' : from) + ': ' + text
+    this.chatMessages.appendChild(li)
+    this.chatMessages.scrollTop = this.chatMessages.scrollHeight
+    if (!this._chatOpen) {
+      this._chatUnread++
+      this.chatBadge.textContent = String(this._chatUnread)
+      this.chatBadge.classList.remove('zero')
+    }
+  }
+
+  showRematchPrompt () {
+    return new Promise((resolve) => {
+      this.rematchBar.classList.remove('hidden')
+      const onRematch = () => {
+        this.rematchBar.classList.add('hidden')
+        cleanup()
+        resolve(true)
+      }
+      const onNewGame = () => {
+        this.rematchBar.classList.add('hidden')
+        cleanup()
+        resolve(false)
+      }
+      const cleanup = () => {
+        this.rematchBtn.removeEventListener('click', onRematch)
+        this.newgameBtn.removeEventListener('click', onNewGame)
+      }
+      this.rematchBtn.addEventListener('click', onRematch)
+      this.newgameBtn.addEventListener('click', onNewGame)
+    })
   }
 
   // -------------------- entry point --------------------
@@ -111,11 +184,7 @@ export default class Run {
     this.awayCity.innerText = game.players[game.away].team.city.toUpperCase()
 
     animationSimple(this.cardsContainer, 'slide-down')
-    if (!game.resume) {
-      await animationWaitForCompletion(this.scoreboardContainer, 'slide-up')
-    } else {
-      this.showBoard(game, this.scoreboardContainer)
-    }
+    this.showBoard(game, this.scoreboardContainer)
     this.actualCards.innerText = ''
     if (game.resume) {
       this.coinImage.classList.toggle('fade', true)
@@ -270,8 +339,14 @@ export default class Run {
   }
 
   printName (game, scoreboard) {
-    scoreboard.querySelector('.home.team').innerText = game.players[game.home].team.abrv
-    scoreboard.querySelector('.away.team').innerText = game.players[game.away].team.abrv
+    const homeNick = game.players[game.home].nickname
+    const awayNick = game.players[game.away].nickname
+    scoreboard.querySelector('.home.team').innerText = homeNick
+      ? game.players[game.home].team.abrv + ' (' + homeNick + ')'
+      : game.players[game.home].team.abrv
+    scoreboard.querySelector('.away.team').innerText = awayNick
+      ? game.players[game.away].team.abrv + ' (' + awayNick + ')'
+      : game.players[game.away].team.abrv
   }
 
   printScore (game, scoreboard) {

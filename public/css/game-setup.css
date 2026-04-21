@@ -214,6 +214,30 @@
     /* border: 2px solid black; */
 }
 
+.nickname-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.nickname-label {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.nickname-input {
+  width: 60%;
+  text-align: center;
+}
+
+.join-url {
+  font-size: 0.65rem;
+  word-break: break-all;
+  opacity: 0.75;
+}
+
 .start-screen input, .start-screen select {
   border-radius: 50px;
   font-family: 'Cabin', sans-serif;
@@ -274,4 +298,117 @@ input {
 
 .play-button {
   grid-area: 4 / 2 / 5 / 4;
+}
+/* Chat tray */
+.chat-tray {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  border-top: 2px solid rgba(255, 255, 255, 0.2);
+  transition: max-height 0.3s ease;
+}
+
+.chat-tray.hidden {
+  display: none;
+}
+
+.chat-tray.collapsed .chat-body {
+  display: none;
+}
+
+.chat-toggle {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: 'Cabin', sans-serif;
+}
+
+.chat-badge {
+  background: #e07;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  padding: 1px 5px;
+  margin-left: 4px;
+}
+
+.chat-badge.zero {
+  display: none;
+}
+
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-messages {
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px;
+  overflow-y: auto;
+  flex: 1;
+  max-height: 120px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.chat-messages li {
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-input-form {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.chat-input {
+  flex: 1;
+  border-radius: 20px;
+  border: none;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-family: 'Cabin', sans-serif;
+}
+
+.chat-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.chat-send {
+  background: #e07;
+  border: none;
+  border-radius: 20px;
+  color: #fff;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-family: 'Cabin', sans-serif;
+}
+
+/* Rematch bar */
+.rematch-bar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 8px;
+}
+
+.rematch-bar.hidden {
+  display: none;
 }

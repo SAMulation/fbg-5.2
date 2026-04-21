@@ -10,12 +10,17 @@
  * "ball moved 12 yards then 1st down" rather than just see the new state pop in.
  */
 
-import type { PlayCall, PlayerId } from "./types.js";
+import type { KickType, PlayCall, PlayerId, ReturnType } from "./types.js";
 
 export type Event =
   | { type: "GAME_STARTED" }
   | { type: "COIN_TOSS_RESULT"; result: "heads" | "tails"; winner: PlayerId }
   | { type: "KICKOFF"; receivingPlayer: PlayerId; ballOn: number }
+  | { type: "KICK_TYPE_CHOSEN"; player: PlayerId; choice: KickType }
+  | { type: "RETURN_TYPE_CHOSEN"; player: PlayerId; choice: ReturnType }
+  | { type: "TOUCHBACK"; receivingPlayer: PlayerId }
+  | { type: "ONSIDE_KICK"; recovered: boolean; recoveringPlayer: PlayerId }
+  | { type: "KICKOFF_RETURN"; returnerPlayer: PlayerId; yards: number }
   | { type: "PLAY_CALLED"; player: PlayerId; play: PlayCall }
   | {
       type: "PLAY_RESOLVED";

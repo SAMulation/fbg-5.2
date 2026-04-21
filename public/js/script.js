@@ -1,4 +1,4 @@
-/* global LZString, location, URLSearchParams */
+/* global LZString, location, URLSearchParams, history, localStorage */
 /* global prompt, alert */
 import Team from './team.js'
 import Game from './game.js'
@@ -49,6 +49,7 @@ const multiPickPanel = document.querySelector('.start-screen-multi-pick')
 const onlinePickPanel = document.querySelector('.start-screen-online-pick')
 const hostCodePanel = document.querySelector('.start-screen-host-code')
 const gamecodeSpan = hostCodePanel.querySelector('span')
+const joinUrlEl = hostCodePanel.querySelector('.join-url')
 const remoteCodePanel = document.querySelector('.start-screen-remote-code')
 const gamecodeInput = remoteCodePanel.querySelector('.game-code-input')
 const team1Panel = document.querySelector('.start-screen-team1')
@@ -60,8 +61,18 @@ const pickHome = document.getElementById('pick-home')
 const pickQtrLen = document.getElementById('pick-qtrlen')
 const loadingPanel = document.querySelector('.start-screen-loading')
 const loadingPanelText = loadingPanel.querySelector('h1')
+const nicknameInput = document.getElementById('nickname-input')
 window.site = site
 window.inputType = 'button'
+
+// Restore saved nickname on load.
+const savedNick = localStorage.getItem('fbg:nickname')
+if (savedNick) nicknameInput.value = savedNick
+nicknameInput.addEventListener('input', () => {
+  const v = nicknameInput.value.trim()
+  if (v) localStorage.setItem('fbg:nickname', v)
+  else localStorage.removeItem('fbg:nickname')
+})
 
 // FUNCTION DEFINITIONS
 const playGame = async (game) => {
@@ -82,6 +93,8 @@ const attachNextEvent = async (site, buttons) => {
       const val = event.target.getAttribute('data-button-value')
 
       if (val === 'login') {
+        site.nickname = nicknameInput.value.trim() || ''
+        if (site.nickname) localStorage.setItem('fbg:nickname', site.nickname)
         await animationWaitThenHide(loginPanel, 'fade')
         titleBall.classList.toggle('spin', false)
         await animationWaitForCompletion(gamePickPanel, 'fade', false)
@@ -159,11 +172,17 @@ const attachNextEvent = async (site, buttons) => {
 
         await animationWaitThenHide(onlinePickPanel, 'fade')
         await animationWaitForCompletion(remoteCodePanel, 'fade', false)
-      } else if (val === 'sms') {
-        // window.location.href = 'sms://&body=It%27s%20football%20season!%20Let%27s%20play%20some%20FootBored.%20Head%20to%20footbored.com%20and%20use%20the%20code:%20' + site.gamecode
-        window.location.href = 'sms:?&body=It%27s%20football%20season!%20Let%27s%20play%20some%20FootBored.%20Head%20to%20footbored.com%20and%20use%20the%20code:%20' + site.gamecode
+      } else if (val === 'share') {
+        const shareUrl = `${location.origin}/?join=${encodeURIComponent(site.gamecode)}`
+        const shareData = { title: 'FootBored', text: "Let's play FootBored!", url: shareUrl }
+        if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+          navigator.share(shareData).catch(() => {})
+        } else {
+          navigator.clipboard.writeText(shareUrl).then(() => alert('Link copied!')).catch(() => {})
+        }
       } else if (val === 'copy') {
-        navigator.clipboard.writeText(site.gamecode)
+        const copyUrl = `${location.origin}/?join=${encodeURIComponent(site.gamecode)}`
+        navigator.clipboard.writeText(copyUrl).then(() => alert('Link copied!')).catch(() => {})
       } else if (val === 'host-next') {
         await animationWaitThenHide(hostCodePanel, 'fade')
         await animationWaitForCompletion(team1Panel, 'fade', false)
@@ -269,6 +288,10 @@ const generateCode = async (site) => {
     // is what the host shares with the remote.
     const { code } = await onlinePusher.createGame()
     site.gamecode = code
+    // Rewrite URL so the host can share it directly.
+    const joinUrl = `${location.origin}/?join=${encodeURIComponent(code)}`
+    history.replaceState(null, '', joinUrl)
+    joinUrlEl.textContent = joinUrl
   } else if (site.connectionType === 'remote' || site.connectionType === 'computer-remote') {
     // Remote join is triggered later via joinOnlineGame(site) once the
     // player has typed/pasted a code.
@@ -386,7 +409,7 @@ const initGame = (site) => {
   if (site.connectionType === 'resume') {
     return new Game(LZString.decompressFromUTF16(window.localStorage.getItem('savedGame')), { gamecode: site.gamecode, pusher })
   } else {
-    return new Game(null, { me: site.me, connections: site.connections, type: site.connectionType, host: site.host, channel: site.channel, gamecode: site.gamecode, pusher }, site.team1, site.team2, site.numberPlayers, site.gameType, site.home, site.qtrLength, site.animation, user[1], user[2], window.inputType)
+    return new Game(null, { me: site.me, connections: site.connections, type: site.connectionType, host: site.host, channel: site.channel, gamecode: site.gamecode, pusher, nickname: site.nickname || '' }, site.team1, site.team2, site.numberPlayers, site.gameType, site.home, site.qtrLength, site.animation, user[1], user[2], window.inputType)
   }
 }
 
@@ -396,6 +419,22 @@ if (window.localStorage.getItem('savedGame')) {
 }
 await setTeamLists(document.querySelectorAll('.teamList'))
 attachNextEvent(site, setupButtons)
+
+// Share-link auto-join: ?join=XXXX opens the remote flow immediately.
+const joinCode = new URLSearchParams(location.search).get('join')
+if (joinCode) {
+  site.gamecode = String(joinCode).toUpperCase().trim()
+  joinOnlineGame(site)
+    .then(() => {
+      startScreen.style.display = 'none'
+      submitGame(site, 'remote')
+    })
+    .catch((err) => {
+      alert('Could not join game: ' + (err.message || err))
+      // Restore clean URL so the user can try a different code.
+      history.replaceState(null, '', '/')
+    })
+}
 
 // Dev shortcut: ?dev=<mode> skips the start screen.
 //   ?dev=single            single-player vs CPU
