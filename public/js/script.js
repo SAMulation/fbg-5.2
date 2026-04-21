@@ -25,7 +25,13 @@ const pusher = new Pusher('f18497dc97d155f3f978', {
   cluster: 'us3'
 })
 
-pusher.signin()
+// Multiplayer (Pusher) is currently disabled. signin() requires server-side
+// PUSHER_SECRET; skipping keeps single-player boot clean on localhost and
+// Netlify previews without secrets.
+const MULTIPLAYER_ENABLED = false
+if (MULTIPLAYER_ENABLED) {
+  pusher.signin()
+}
 
 // pusher.bind('pusher:signin_success', (data) => {
 //   channel = pusher.subscribe('private-channel')
