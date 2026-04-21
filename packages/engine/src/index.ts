@@ -54,6 +54,8 @@ export {
   samePlayOutcome,
   trickPlayOutcome,
   bigPlayOutcome,
+  puntReturnMultiplier,
+  puntKickDistance,
   type SamePlayOutcome,
   type TrickPlayOutcome,
   type BigPlayOutcome,

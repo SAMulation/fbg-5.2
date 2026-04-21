@@ -8,6 +8,8 @@ import {
   bigPlayOutcome,
   samePlayOutcome,
   trickPlayOutcome,
+  puntReturnMultiplier,
+  puntKickDistance,
 } from "../rules/specials/outcomes.js";
 
 describe("samePlayOutcome", () => {
@@ -88,6 +90,30 @@ describe("bigPlayOutcome (offense beneficiary)", () => {
   });
   it("die 6 → TD", () => {
     expect(bigPlayOutcome(1, 1, 6, 50)).toEqual({ kind: "offense_td" });
+  });
+});
+
+describe("puntReturnMultiplier", () => {
+  it("returns correct multiplier per card", () => {
+    expect(puntReturnMultiplier("King")).toBe(7);
+    expect(puntReturnMultiplier("Queen")).toBe(4);
+    expect(puntReturnMultiplier("Jack")).toBe(1);
+    expect(puntReturnMultiplier("10")).toBe(-0.5);
+  });
+});
+
+describe("puntKickDistance", () => {
+  it("yards=6 + tails = 30", () => {
+    expect(puntKickDistance(6, "tails")).toBe(30);
+  });
+  it("yards=6 + heads = 50 (adds 20)", () => {
+    expect(puntKickDistance(6, "heads")).toBe(50);
+  });
+  it("yards=10 + heads = 70 (max)", () => {
+    expect(puntKickDistance(10, "heads")).toBe(70);
+  });
+  it("yards=1 + tails = 5 (min)", () => {
+    expect(puntKickDistance(1, "tails")).toBe(5);
   });
 });
 

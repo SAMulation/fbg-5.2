@@ -117,6 +117,27 @@ export type BigPlayOutcome =
  *   4-5 → fumble, defense returns max(half-to-goal, 25)
  *   6   → fumble, defensive TD
  */
+// ---------- Punt -------------------------------------------------------------
+
+/** Punt return multiplier by drawn multiplier card (run.js:2196). */
+export function puntReturnMultiplier(card: MultiplierCardName): number {
+  switch (card) {
+    case "King": return 7;
+    case "Queen": return 4;
+    case "Jack": return 1;
+    case "10": return -0.5;
+  }
+}
+
+/**
+ * Punt kick distance formula (run.js:2143):
+ *   10 * yardsCard / 2 + 20 * (coin === "heads" ? 1 : 0)
+ * yardsCard is the 1-10 card. Range: 5-70 yards.
+ */
+export function puntKickDistance(yardsCard: number, coin: "heads" | "tails"): number {
+  return (10 * yardsCard) / 2 + (coin === "heads" ? 20 : 0);
+}
+
 export function bigPlayOutcome(
   beneficiary: PlayerId,
   offense: PlayerId,

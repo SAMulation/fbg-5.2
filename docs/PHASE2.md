@@ -1,5 +1,20 @@
 # Phase 2 — Wiring v5.1's frontend through `@fbg/engine`
 
+## Status: **complete for rules**
+
+Every football rule in FootBored now flows through `@fbg/engine`.
+What remains in v5.1 is the DOM / animation / input / multiplayer
+scaffolding — which is the intended state: the engine owns the math,
+v5.1 owns the experience.
+
+The "collapse" step from the earlier roadmap (replacing
+`playMechanism` with a single `engine.reduce` call plus a pure
+event-driven animator) is the natural Phase 3 kickoff: it requires
+restructuring v5.1's imperative animation flow, which is a deeper
+architectural change than a rule-by-rule port and is better done
+alongside the Supabase server-authority work that motivated Phase 1
+in the first place.
+
 ## Goal
 
 Replace v5.1's game-logic code with calls into the pure engine while
@@ -44,6 +59,21 @@ time — the file is committed.
 - **[public/js/run.js#fieldGoal](../public/js/run.js)** routes through
   `engine.resolveFieldGoal` for the make/miss decision. Kicker icing
   is detected in v5.1 and passed via `{ iced: true }`.
+- **[public/js/run.js#doPlay](../public/js/run.js)** — regular-play
+  fast path: clean SR/LR/SP/LP non-matching picks call
+  `engineRunner.resolveRegularViaEngine`, which runs the engine
+  end-to-end for matchup → multiplier → yards → yardage and hands
+  back a pre-baked outcome.
+- **[public/js/run.js#samePlay / trickPlay / bigPlay](../public/js/run.js)**
+  — rewritten as thin switches over `engine.samePlayOutcome`,
+  `engine.trickPlayOutcome`, `engine.bigPlayOutcome`. v5.1 keeps the
+  alerts / animations / possession-change calls; the rule tables are
+  the engine's.
+- **[public/js/run.js#punt](../public/js/run.js)** uses
+  `engine.puntKickDistance` and `engine.puntReturnMultiplier` for
+  the two deterministic pieces (kick formula + return multiplier
+  table). The block / muff 2-sixes checks are so trivial they stay
+  inline.
 
 ## What's next, in order of value
 
@@ -100,45 +130,37 @@ and migrate one file at a time.
 
 ### 4. Replace special-play resolvers one at a time
 
-**Done:** `hailMary`, `fieldGoal`.
+**Done:** `hailMary`, `fieldGoal`, `samePlay`, `trickPlay`, `bigPlay`,
+`punt`, regular-play fast path.
 
-**Deferred until after the collapse (step 5):** `samePlay`, `trickPlay`,
-`punt`. These three interleave multiple async RNG pulls with DOM
-animation in ways that make a "swap the math but keep the flow" port
-trickier than the final architecture change. Attempting to pre-fetch
-their full RNG sequence for `replayRng` hits a chicken-and-egg
-problem: the next call's inputs depend on previous call's outputs
-(e.g. Same Play King path triggers an extra d6 for Big Play).
+The rule-tables-as-pure-helpers pattern (`samePlayOutcome`,
+`trickPlayOutcome`, `bigPlayOutcome`, `puntReturnMultiplier`,
+`puntKickDistance`) turned out to be the right call instead of the
+earlier "pre-fetch RNG then replayRng" idea. v5.1's resolvers keep
+their async flow / alerts / animations and just look up the rule
+outcome from the engine. This was the piece the original roadmap
+was missing.
 
-The cleaner path is to swap them as part of step 5, once animations
-are event-driven — then the engine runs end-to-end and emits events
-that the animator walks.
+### 5. The final collapse — Phase 3 territory
 
-`bigPlay` doesn't need its own swap; it's only called from inside
-`samePlay` and `trickPlay`, so it rides along with those.
-
-### 5. Delete `playMechanism` itself
-
-Once every special play is engine-backed, the giant `playMechanism`
-function ([run.js:1036](../public/js/run.js#L1036)) becomes a thin
-dispatcher. At that point, replace it with a single call:
+Replacing `playMechanism` ([run.js:1036](../public/js/run.js#L1036))
+with a single `engine.reduce` + pure event-driven animator is the
+natural kickoff for Phase 3 (Supabase server authority). It requires
+restructuring v5.1's imperative animation flow, and pairs cleanly
+with moving the engine to the server and driving the client from a
+remote event stream.
 
 ```js
+// Eventual shape — Phase 3:
 const result = engine.reduce(this.engineState, action, rng)
 this.engineState = result.state
 await this._animate(result.events)
 ```
 
-`_animate` is a new function that walks the `events[]` array and
-plays the corresponding DOM transitions. This is where the v5.1
-graphics live forever.
-
-### 6. Drop the `Game`/`Player`/`Run` classes
-
-Final form: `public/js/script.js` holds an engine `GameState`,
-imports `engine.reduce`, and dispatches actions from button clicks.
-Animations are pure event consumers. The old class-based architecture
-is gone.
+`_animate` walks the `events[]` array and plays the corresponding
+DOM transitions. Once that exists, the `Game` / `Player` / `Run`
+classes can be deleted and `script.js` holds only the engine
+`GameState` plus button-click dispatch.
 
 ## Multiplayer story
 

@@ -15,7 +15,9 @@ import {
   resolveHailMary,
   samePlayOutcome,
   trickPlayOutcome,
-  bigPlayOutcome
+  bigPlayOutcome,
+  puntReturnMultiplier,
+  puntKickDistance
 } from './engine.js'
 import { buildEngineState, replayRng } from './engineBridge.js'
 import { canResolveRegularViaEngine, resolveRegularViaEngine } from './engineRunner.js'
@@ -2143,7 +2145,7 @@ export default class Run {
 
       const yard = await game.decYards(game.me)
 
-      kickDist = 10 * yard / 2 + 20 * tmp
+      kickDist = puntKickDistance(yard, tmp ? 'heads' : 'tails')
 
       // Check for touchbacks
       if (game.spot + kickDist > 100) {
@@ -2196,15 +2198,7 @@ export default class Run {
     if (possession && !touchback && !block) {
       const multCard = await game.decMults(game.me)
       const yard = await game.decYards(game.me)
-      let mult = -0.5
-
-      if (multCard.card === 'King') {
-        mult = 7
-      } else if (multCard.card === 'Queen') {
-        mult = 4
-      } else if (multCard.card === 'Jack') {
-        mult = 1
-      }
+      const mult = puntReturnMultiplier(multCard.card)
 
       retDist = Math.round(mult * yard)
 
