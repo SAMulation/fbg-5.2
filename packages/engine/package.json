@@ -7,10 +7,12 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "build:browser": "esbuild src/index.ts --bundle --format=esm --outfile=../../public/js/engine.js --sourcemap=inline",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "esbuild": "^0.24.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

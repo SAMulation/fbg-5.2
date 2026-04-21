@@ -5,7 +5,10 @@ import Player from './player.js'
 import Stat from './stat.js'
 import Utils from './remoteUtils.js'
 import { Queue } from './queue.js'
-import { MULTI, MATCHUP, CHANGE, TB, PEN_DOWN, PEN_NO_DOWN, TIMEOUT, TWOMIN, SAFETY_KICK, KICKOFF, KICK, INIT, INIT_OTC, REG, OFF_TP, DEF_TP, SAME, FG, PUNT, HAIL, TWO_PT, TD, SAFETY, LEAVE, P1_WINS, P2_WINS, EXIT, TWOPT, OT_START, MODAL_MESSAGES } from './defaults.js'
+import { CHANGE, TB, PEN_DOWN, PEN_NO_DOWN, TIMEOUT, TWOMIN, SAFETY_KICK, KICKOFF, KICK, INIT, INIT_OTC, REG, OFF_TP, DEF_TP, SAME, FG, PUNT, HAIL, TWO_PT, TD, SAFETY, LEAVE, P1_WINS, P2_WINS, EXIT, TWOPT, OT_START, MODAL_MESSAGES } from './defaults.js'
+// Engine bundle (built from packages/engine via `npm run build:browser`).
+// All deterministic game math should flow through this — DOM/animation stays in run.js.
+import { MULTI, matchupQuality } from './engine.js'
 import { alertBox, sleep, setBallSpot, setSpot, animationSimple, animationWaitForCompletion, animationWaitThenHide, animationPrePick, animationPostPick, resetBoardContainer, firstDownLine } from './graphics.js'
 
 export default class Run {
@@ -2357,15 +2360,17 @@ export default class Run {
   };
 
   calcTimes (game, p1, p2, multIdx) {
-    const p1Num = 'SRLRSPLPTP'.indexOf(p1) / 2
-    const p2Num = 'SRLRSPLPTP'.indexOf(p2) / 2
     let match = 0
 
-    if (p1Num === 4 || p2Num === 4) {
+    // Trick Play overrides matchup to quality 1 (best for offense), with the
+    // play-level multiplier set elsewhere (run.trickPlay).
+    if (p1 === 'TP' || p2 === 'TP') {
       match = 1
       game.thisPlay.quality = '/'
     } else {
-      match = MATCHUP[game.offNum === 1 ? p1Num : p2Num][game.offNum === 1 ? p2Num : p1Num]
+      const off = game.offNum === 1 ? p1 : p2
+      const def = game.offNum === 1 ? p2 : p1
+      match = matchupQuality(off, def)
     }
 
     if (game.status === SAME) {
