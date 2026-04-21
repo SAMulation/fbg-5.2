@@ -30,6 +30,20 @@ time — the file is committed.
   duplicates in [defaults.js](../public/js/defaults.js) are removed.
 - **[public/js/game.js#fillMults / fillYards](../public/js/game.js)**
   use `engine.freshDeckMultipliers` and `engine.freshDeckYards`.
+- **[public/js/game.js#decMults / decYards](../public/js/game.js)**
+  pre-fetch indices via `Utils.randInt` (multiplayer sync), then replay
+  them through `engine.drawMultiplier` / `drawYards` so the deck
+  arithmetic is engine-owned.
+- **[public/js/engineBridge.js](../public/js/engineBridge.js)** —
+  `buildEngineState(game)`, `applyEngineStateToGame(game, state)`,
+  `replayRng(values)`. The lift / lower / rng adapters that let
+  resolvers delegate math while v5.1 drives the flow.
+- **[public/js/run.js#hailMary](../public/js/run.js)** routes through
+  `engine.resolveHailMary` for the die→outcome table. v5.1 still owns
+  the DOM + `changePoss` calls.
+- **[public/js/run.js#fieldGoal](../public/js/run.js)** routes through
+  `engine.resolveFieldGoal` for the make/miss decision. Kicker icing
+  is detected in v5.1 and passed via `{ iced: true }`.
 
 ## What's next, in order of value
 
@@ -86,18 +100,22 @@ and migrate one file at a time.
 
 ### 4. Replace special-play resolvers one at a time
 
-`run.hailMary`, `run.fieldGoal`, `run.bigPlay`, etc each have an
-engine equivalent. Order from simplest to most-coupled:
+**Done:** `hailMary`, `fieldGoal`.
 
-1. `hailMary` (no card draws, just a die roll)
-2. `bigPlay` (ditto)
-3. `fieldGoal`
-4. `samePlay`
-5. `trickPlay` (offensive then defensive)
-6. `punt`
+**Deferred until after the collapse (step 5):** `samePlay`, `trickPlay`,
+`punt`. These three interleave multiple async RNG pulls with DOM
+animation in ways that make a "swap the math but keep the flow" port
+trickier than the final architecture change. Attempting to pre-fetch
+their full RNG sequence for `replayRng` hits a chicken-and-egg
+problem: the next call's inputs depend on previous call's outputs
+(e.g. Same Play King path triggers an extra d6 for Big Play).
 
-Each replacement is a separate commit. The animation code stays in
-run.js; only the math/state-mutation calls swap.
+The cleaner path is to swap them as part of step 5, once animations
+are event-driven — then the engine runs end-to-end and emits events
+that the animator walks.
+
+`bigPlay` doesn't need its own swap; it's only called from inside
+`samePlay` and `trickPlay`, so it rides along with those.
 
 ### 5. Delete `playMechanism` itself
 
