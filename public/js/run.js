@@ -8,7 +8,15 @@ import { Queue } from './queue.js'
 import { CHANGE, TB, PEN_DOWN, PEN_NO_DOWN, TIMEOUT, TWOMIN, SAFETY_KICK, KICKOFF, KICK, INIT, INIT_OTC, REG, OFF_TP, DEF_TP, SAME, FG, PUNT, HAIL, TWO_PT, TD, SAFETY, LEAVE, P1_WINS, P2_WINS, EXIT, TWOPT, OT_START, MODAL_MESSAGES } from './defaults.js'
 // Engine bundle (built from packages/engine via `npm run build:browser`).
 // All deterministic game math should flow through this — DOM/animation stays in run.js.
-import { MULTI, matchupQuality, resolveFieldGoal, resolveHailMary } from './engine.js'
+import {
+  MULTI,
+  matchupQuality,
+  resolveFieldGoal,
+  resolveHailMary,
+  samePlayOutcome,
+  trickPlayOutcome,
+  bigPlayOutcome
+} from './engine.js'
 import { buildEngineState, replayRng } from './engineBridge.js'
 import { canResolveRegularViaEngine, resolveRegularViaEngine } from './engineRunner.js'
 import { alertBox, sleep, setBallSpot, setSpot, animationSimple, animationWaitForCompletion, animationWaitThenHide, animationPrePick, animationPostPick, resetBoardContainer, firstDownLine } from './graphics.js'
@@ -1918,30 +1926,39 @@ export default class Run {
   };
 
   async samePlay (game) {
-    let coin = null
-    let multCard = null
-
     await alertBox(this, 'Same play!')
 
-    coin = await Utils.coinFlip(game, game.me)
+    // v5.1's coin comes back truthy for 'heads' (via coinFlip returning 1 for heads).
+    const coinRaw = await Utils.coinFlip(game, game.me)
+    const coin = coinRaw ? 'heads' : 'tails'
+    const multCard = await game.decMults(game.me)
 
-    multCard = await game.decMults(game.me)
+    const outcome = samePlayOutcome(multCard.card, coin)
 
-    if (multCard.card === 'King') {
-      await this.bigPlay(game, coin ? game.offNum : game.defNum)
-    } else if (multCard.card === 'Queen' && coin) {
-      game.thisPlay.multiplier = 3
-    } else if (multCard.card === 'Jack' && !coin) {
-      game.thisPlay.multiplier = -3
-    } else if ((multCard.card === 'Queen' && !coin) || (multCard.card === 'Jack' && coin)) {
-      game.thisPlay.multiplier = 0
-    } else {
-      if (coin) {
+    switch (outcome.kind) {
+      case 'big_play': {
+        const player = outcome.beneficiary === 'offense' ? game.offNum : game.defNum
+        await this.bigPlay(game, player)
+        break
+      }
+      case 'multiplier': {
+        game.thisPlay.multiplier = outcome.value
+        // If drawYards is false (mult=0), the outer calcDist sees multiplier
+        // === 0 and skips the yards draw automatically.
+        break
+      }
+      case 'interception': {
         await alertBox(this, 'Picked!')
         await this.changePoss(game, 'to')
+        game.thisPlay.dist = 0
+        game.thisPlay.yardCard = '/'
+        break
       }
-      game.thisPlay.dist = 0
-      game.thisPlay.yardCard = '/'
+      case 'no_gain': {
+        game.thisPlay.dist = 0
+        game.thisPlay.yardCard = '/'
+        break
+      }
     }
   };
 
@@ -1952,54 +1969,34 @@ export default class Run {
   };
 
   async bigPlay (game, num) {
-    let die = null
-    die = await Utils.rollDie(game, game.me)
+    const die = await Utils.rollDie(game, game.me)
+    const outcome = bigPlayOutcome(num, game.offNum, die, game.spot)
 
-    // Offensive Big Play
-    if (game.offNum === num) {
-      if (die >= 1 && die <= 3) {
-        game.thisPlay.dist = 25
-      } else if (die === 6) {
-        game.thisPlay.dist = 101 // Touchdown
-      } else { // die === 4 && die === 5
-        if ((100 - game.spot) / 2 > 40) { // Half the field or 40, whichever is more
-          game.thisPlay.dist = Math.round((100 - game.spot) / 2)
-        } else {
-          game.thisPlay.dist = 40
-        }
-      }
-      // Defense
-    } else {
-      if (die >= 1 && die <= 3) {
-        // If timeout called, return
-        if (game.changeTime === TIMEOUT) {
-          await this.returnTime(game)
-        }
-
+    switch (outcome.kind) {
+      case 'offense_gain':
+        game.thisPlay.dist = outcome.yards
+        break
+      case 'offense_td':
+        game.thisPlay.dist = 101 // v5.1 convention
+        break
+      case 'defense_penalty':
+        if (game.changeTime === TIMEOUT) await this.returnTime(game)
         game.changeTime = PEN_DOWN
-
-        if (game.spot - 10 < 1) {
-          game.thisPlay.dist = -Math.trunc(game.spot / 2) // Half the distance to the goal
-        } else {
-          game.thisPlay.dist = -10 // 10-yard penalty on off
-        }
-      } else {
-        if (die === 6) {
-          await alertBox(this, 'FUMBLE!!!')
-          game.thisPlay.dist = 101 // Touchdown
-        } else { // die === 4 && die === 5
-          await alertBox(this, 'FUMBLE!!')
-          if ((100 - game.spot) / 2 > 25) { // Half the field or 25, whichever is more
-            game.thisPlay.dist = Math.round((100 - game.spot) / 2)
-          } else {
-            game.thisPlay.dist = 25
-          }
-        }
+        game.thisPlay.dist = outcome.rawYards
+        break
+      case 'defense_fumble_return':
+        await alertBox(this, 'FUMBLE!!')
+        game.thisPlay.dist = outcome.yards
         await this.changePoss(game, 'to')
-      }
+        break
+      case 'defense_fumble_td':
+        await alertBox(this, 'FUMBLE!!!')
+        game.thisPlay.dist = 101
+        await this.changePoss(game, 'to')
+        break
     }
 
-    // Prevent calculations
+    // Skip calcDist's draws — outcome is already applied.
     game.thisPlay.multiplierCard = '/'
     game.thisPlay.yardCard = '/'
     game.thisPlay.multiplier = '/'
@@ -2009,52 +2006,43 @@ export default class Run {
     let die = null
     die = await Utils.rollDie(game, game.me)
 
-    await alertBox(this, (game.status === OFF_TP ? game.players[game.offNum].team.name : game.players[game.defNum].team.name) + ' trick play!')
+    const caller = game.status === OFF_TP ? game.offNum : game.defNum
+    await alertBox(this, game.players[caller].team.name + ' trick play!')
 
-    if (die === 2) {
-      // If timeout called, return
-      if (game.changeTime === TIMEOUT) {
-        await this.returnTime(game)
-      }
-      game.changeTime = PEN_DOWN
+    const outcome = trickPlayOutcome(caller, game.offNum, die)
 
-      // Offense Trick Play
-      if (game.status === 12) {
-        if (game.spot + 15 > 99) {
-          game.thisPlay.dist = Math.trunc((100 - game.spot) / 2) // Half the distance to the goal
-        } else {
-          game.thisPlay.dist = 15 // 15-yard penalty on def
+    switch (outcome.kind) {
+      case 'penalty': {
+        if (game.changeTime === TIMEOUT) await this.returnTime(game)
+        game.changeTime = PEN_DOWN
+        // Half-the-distance cap — engine returns the raw ±15; cap here
+        // because the cap depends on current spot, which the engine's
+        // outcome table doesn't take as input.
+        let dist = outcome.rawYards
+        if (dist > 0 && game.spot + dist > 99) {
+          dist = Math.trunc((100 - game.spot) / 2)
+        } else if (dist < 0 && game.spot + dist < 1) {
+          dist = -Math.trunc(game.spot / 2)
         }
-        // Defense
-      } else {
-        if (game.spot - 15 < 1) {
-          game.thisPlay.dist = -Math.trunc(game.spot / 2) // Half the distance to the goal
-        } else {
-          game.thisPlay.dist = -15 // 15-yard penalty on off
-        }
+        game.thisPlay.dist = dist
+        game.thisPlay.multiplierCard = '/'
+        game.thisPlay.yardCard = '/'
+        break
       }
-
-      // Prevent calcuations
-      game.thisPlay.multiplierCard = '/'
-      game.thisPlay.yardCard = '/'
-    } else if (die === 3) {
-      game.thisPlay.multiplierCard = '/'
-      game.thisPlay.multiplier = -3
-    } else if (die === 4) {
-      game.thisPlay.multiplierCard = '/'
-      game.thisPlay.multiplier = 4
-    } else if (die === 5) {
-      await this.bigPlay(game, game.status === OFF_TP ? game.offNum : game.defNum)
-      // die === 1 && die === 6
-    } else {
-      if (game.status === OFF_TP) {
-        game.thisPlay.bonus = 5
-      } else {
-        game.thisPlay.bonus = -5
+      case 'multiplier': {
+        game.thisPlay.multiplierCard = '/'
+        game.thisPlay.multiplier = outcome.value
+        break
       }
-
-      // Place play based on die roll
-      game.players[(game.status === OFF_TP ? game.offNum : game.defNum)].currentPlay = die === 1 ? 'LP' : 'LR'
+      case 'big_play': {
+        await this.bigPlay(game, outcome.beneficiary)
+        break
+      }
+      case 'overlay': {
+        game.thisPlay.bonus = outcome.bonus
+        game.players[caller].currentPlay = outcome.play
+        break
+      }
     }
   };
 

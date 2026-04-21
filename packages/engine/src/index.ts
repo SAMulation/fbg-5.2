@@ -51,6 +51,14 @@ export {
   resolveTwoPointConversion,
 } from "./rules/specials/index.js";
 export {
+  samePlayOutcome,
+  trickPlayOutcome,
+  bigPlayOutcome,
+  type SamePlayOutcome,
+  type TrickPlayOutcome,
+  type BigPlayOutcome,
+} from "./rules/specials/outcomes.js";
+export {
   startOvertime,
   startOvertimePossession,
   endOvertimePossession,
