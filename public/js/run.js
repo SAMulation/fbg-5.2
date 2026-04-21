@@ -739,6 +739,16 @@ export default class Run {
 
     await this.prePlay(game, game.status)
 
+    // Server-authoritative kickoff path: dispatch RESOLVE_KICKOFF, apply the
+    // resulting engine state to v5.1's game object, play a simple "ball
+    // moved" animation. Replaces v5.1's kickPage/returnPage/kickDec flow
+    // for online multiplayer. Single-player + local co-op still use the
+    // v5.1 interactive path below.
+    if (this._inServerAuthMode(game) && game.status !== SAFETY_KICK) {
+      await this._serverKickoff(game)
+      return
+    }
+
     if (game.status === SAFETY_KICK) {
       await this.punt(game) // Safety Kick
 
@@ -763,6 +773,71 @@ export default class Run {
       }
     }
   };
+
+  /**
+   * True when the client should route the current step through the DO
+   * rather than compute locally. Requires online multiplayer and an
+   * engineState that's been successfully initialized.
+   */
+  _inServerAuthMode (game) {
+    return game.isMultiplayer() &&
+      this.channel &&
+      typeof this.channel.dispatchAction === 'function' &&
+      game.engineState
+  }
+
+  async _serverKickoff (game) {
+    // Reset board.
+    this.playerContainer.classList.toggle('fade', true)
+    game.spot = 65
+    await this.moveBall(game, 'show')
+
+    const kickerName = game.players[game.engineState.field.offense].team.name
+    await alertBox(this, kickerName + ' kicking off...')
+
+    // Host drives the dispatch; remote just awaits the broadcast.
+    if (game.connection.host) {
+      this.channel.dispatchAction({ type: 'RESOLVE_KICKOFF' })
+    }
+
+    // Drain state broadcasts until we see a KICKOFF/PUNT event (the event
+    // that signals resolution has completed).
+    let resolved = null
+    while (!resolved) {
+      const { state, events } = await this.channel.nextState()
+      game.engineState = state
+      if (events.some(e => e.type === 'PUNT' || e.type === 'KICKOFF')) {
+        resolved = { state, events }
+      }
+    }
+
+    // Apply authoritative field state to v5.1's game. Server's ballOn and
+    // offense are what the next play resolves against.
+    game.spot = resolved.state.field.ballOn
+    game.firstDown = resolved.state.field.firstDownAt
+    game.down = resolved.state.field.down
+    game.offNum = resolved.state.field.offense
+    game.defNum = game.opp(game.offNum)
+    game.status = REG
+
+    const receiverName = game.players[game.offNum].team.name
+    const punt = resolved.events.find(e => e.type === 'PUNT')
+    if (punt) {
+      await alertBox(this, receiverName + ' take the ball at the ' + this._yardLineLabel(game.spot) + '.')
+    }
+
+    await setBallSpot(this)
+    await firstDownLine(this)
+    this.printMsgDown(game, this.scoreboardContainer)
+    this.printMsgSpot(game, this.scoreboardContainer)
+  }
+
+  _yardLineLabel (ballOn) {
+    // ballOn is distance from offense's own goal (0-100).
+    if (ballOn === 50) return '50'
+    if (ballOn < 50) return 'own ' + ballOn
+    return 'opponent ' + (100 - ballOn)
+  }
 
   async changePoss (game, mode = '') {
     // Modes explained
@@ -1135,6 +1210,12 @@ export default class Run {
 
   async playMechanism (game) {
     await this.prePlay(game, REG)
+
+    if (this._inServerAuthMode(game)) {
+      await this._serverPlayCycle(game)
+      return
+    }
+
     await this.pickPlay(game)
 
     if (game.status !== EXIT) {
@@ -1147,6 +1228,96 @@ export default class Run {
       await this.doPlay(game, game.players[1].currentPlay, game.players[2].currentPlay)
     }
   };
+
+  /**
+   * Server-authoritative play. Each client dispatches PICK_PLAY for its
+   * own player; the DO stages the first pick and resolves on the second,
+   * broadcasting state + events (incl. PLAY_RESOLVED). We drain broadcasts
+   * until the resolution arrives, then populate v5.1's game.thisPlay so
+   * endPlay's existing animation pipeline renders the outcome.
+   */
+  async _serverPlayCycle (game) {
+    // Clear both players' current picks (defensive).
+    game.players[1].currentPlay = null
+    game.players[2].currentPlay = null
+
+    // Get the local player's play from the usual UI.
+    const myPlay = await this.input.getInput(
+      game, game.me, 'reg',
+      game.players[game.me].team.name + ' pick your play...'
+    )
+    if (game.status === EXIT) return
+
+    game.players[game.me].currentPlay = myPlay
+    this.channel.dispatchAction({ type: 'PICK_PLAY', player: game.me, play: myPlay })
+
+    // Show waiting message for the other player.
+    const otherP = game.opp(game.me)
+    await alertBox(this, game.players[otherP].team.name + ' are picking their play...')
+
+    // Drain state broadcasts until the play resolves.
+    let resolved = null
+    while (!resolved) {
+      const { state, events } = await this.channel.nextState()
+      game.engineState = state
+
+      const otherCall = events.find(e => e.type === 'PLAY_CALLED' && e.player === otherP)
+      if (otherCall) game.players[otherP].currentPlay = otherCall.play
+
+      if (events.some(e => e.type === 'PLAY_RESOLVED' ||
+                           e.type === 'TOUCHDOWN' ||
+                           e.type === 'SAFETY' ||
+                           e.type === 'TURNOVER' ||
+                           e.type === 'TURNOVER_ON_DOWNS')) {
+        resolved = { state, events }
+      }
+    }
+
+    // Populate game.thisPlay from the resolved event so v5.1's endPlay
+    // animation pipeline has what it needs. calcDist's destructive
+    // normalization (see endPlay comment) mangles some rendering fields;
+    // game.thisPlay.dist is what drives the actual yardage, so that one
+    // must survive.
+    const playEvent = resolved.events.find(e => e.type === 'PLAY_RESOLVED')
+    if (playEvent) {
+      game.thisPlay.multiplier = playEvent.multiplier.value
+      game.thisPlay.multiplierCard = {
+        card: playEvent.multiplier.card,
+        num: this._mcardNum(playEvent.multiplier.card)
+      }
+      game.thisPlay.yardCard = playEvent.yardsCard
+      game.thisPlay.quality = playEvent.matchupQuality
+      game.thisPlay.dist = playEvent.yardsGained
+    } else {
+      // Specials (Hail Mary die, Big Play, etc) don't emit PLAY_RESOLVED.
+      // The state delta tells us where the ball ended up; derive dist.
+      const prevBallOn = game.spot
+      const newBallOn = resolved.state.field.ballOn
+      const flipped = resolved.state.field.offense !== game.offNum
+      game.thisPlay.multiplier = '/'
+      game.thisPlay.multiplierCard = '/'
+      game.thisPlay.yardCard = '/'
+      game.thisPlay.quality = '/'
+      game.thisPlay.dist = flipped ? (100 - newBallOn) - prevBallOn : newBallOn - prevBallOn
+    }
+
+    // Reflect events that push v5.1 into a specific status.
+    if (resolved.events.some(e => e.type === 'TOUCHDOWN')) {
+      game.status = 101 // TD
+    } else if (resolved.events.some(e => e.type === 'SAFETY')) {
+      game.status = 102 // SAFETY
+    }
+  }
+
+  _mcardNum (card) {
+    switch (card) {
+      case 'King': return 1
+      case 'Queen': return 2
+      case 'Jack': return 3
+      case '10': return 4
+      default: return 0
+    }
+  }
 
   async lastChanceTO (game) {
     let selection
