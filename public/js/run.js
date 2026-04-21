@@ -8,7 +8,8 @@ import { Queue } from './queue.js'
 import { CHANGE, TB, PEN_DOWN, PEN_NO_DOWN, TIMEOUT, TWOMIN, SAFETY_KICK, KICKOFF, KICK, INIT, INIT_OTC, REG, OFF_TP, DEF_TP, SAME, FG, PUNT, HAIL, TWO_PT, TD, SAFETY, LEAVE, P1_WINS, P2_WINS, EXIT, TWOPT, OT_START, MODAL_MESSAGES } from './defaults.js'
 // Engine bundle (built from packages/engine via `npm run build:browser`).
 // All deterministic game math should flow through this — DOM/animation stays in run.js.
-import { MULTI, matchupQuality } from './engine.js'
+import { MULTI, matchupQuality, resolveHailMary } from './engine.js'
+import { buildEngineState, replayRng } from './engineBridge.js'
 import { alertBox, sleep, setBallSpot, setSpot, animationSimple, animationWaitForCompletion, animationWaitThenHide, animationPrePick, animationPostPick, resetBoardContainer, firstDownLine } from './graphics.js'
 
 export default class Run {
@@ -2243,28 +2244,35 @@ export default class Run {
   };
 
   async hailMary (game) {
-    let msg = null
-    let dst = 0
-    let die = null
-    die = await Utils.rollDie(game, game.me)
+    // Pre-fetch the die async so multiplayer Pusher RNG-sync still holds.
+    const die = await Utils.rollDie(game, game.me)
 
     await alertBox(this, game.players[game.offNum].team.name + ' hail mary!')
     document.querySelector('.' + (game.away === game.offNum ? 'away' : 'home') + ' .hm' + game.players[game.offNum].hm).classList.add('called')
 
-    if (die === 1) {
-      msg = 'BIG SACK!'
-      dst = -10
-    } else if (die === 2) {
-      dst = 20
-    } else if (die === 3) {
-      dst = 0
-    } else if (die === 4) {
-      dst = 40
-    } else if (die === 5) {
+    // Replay through the engine for the outcome table. The engine handles
+    // die→yards mapping, interception, and TD. We extract the outcome events
+    // and let v5.1's endPlay apply dist + handle animations.
+    const engineState = buildEngineState(game)
+    const rng = replayRng([die])
+    const result = resolveHailMary(engineState, rng)
+
+    const resolved = result.events.find(e => e.type === 'PLAY_RESOLVED')
+    const touchdown = result.events.some(e => e.type === 'TOUCHDOWN')
+    const interception = result.events.some(e => e.type === 'TURNOVER' && e.reason === 'interception')
+    const safety = result.events.some(e => e.type === 'SAFETY')
+
+    let msg = null
+    let dst = 0
+    if (interception) {
       msg = 'PICKED!'
       await this.changePoss(game, 'to')
-    } else {
-      dst = 101
+    } else if (touchdown) {
+      dst = 101 // v5.1 convention: 101+ triggers TD in endPlay
+    } else if (safety || resolved) {
+      // endPlay detects safety via `spot + dist <= 0`; yardsGained works directly.
+      dst = resolved ? resolved.yardsGained : (die === 1 ? -10 : 0)
+      if (die === 1) msg = 'BIG SACK!'
     }
 
     if (msg) {

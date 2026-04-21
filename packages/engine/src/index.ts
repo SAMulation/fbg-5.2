@@ -40,6 +40,17 @@ export { matchupQuality, MATCHUP, MULTI } from "./rules/matchup.js";
 export { computeYardage, type YardageInputs, type YardageOutcome } from "./rules/yardage.js";
 export { drawMultiplier, drawYards } from "./rules/deck.js";
 export {
+  resolveBigPlay,
+  resolveDefensiveTrickPlay,
+  resolveFieldGoal,
+  resolveHailMary,
+  resolveKickoff,
+  resolveOffensiveTrickPlay,
+  resolvePunt,
+  resolveSamePlay,
+  resolveTwoPointConversion,
+} from "./rules/specials/index.js";
+export {
   startOvertime,
   startOvertimePossession,
   endOvertimePossession,
