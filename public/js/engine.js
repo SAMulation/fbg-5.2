@@ -1384,6 +1384,8 @@ export {
   emptyHand,
   emptyStats,
   endOvertimePossession,
+  freshDeckMultipliers,
+  freshDeckYards,
   initialState,
   matchupQuality,
   opp,

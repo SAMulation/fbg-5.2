@@ -6,6 +6,9 @@ import Utils from './remoteUtils.js'
 import { CHANGE, INIT, INIT_OTC } from './defaults.js'
 import PromptInput from './promptInput.js'
 import FormInput from './formInput.js'
+// Engine: card-deck primitives. v5.1's deck-draw logic remains async to
+// preserve multiplayer RNG sync, but initial deck state comes from here.
+import { freshDeckMultipliers as engineFreshMults, freshDeckYards as engineFreshYards } from './engine.js'
 
 export default class Game {
   constructor (resume = null, connection = null, team1 = null, team2 = null, numberPlayers = 1, gameType = 'reg', home = 1, qtrLength = 7, animation = true, stats1 = null, stats2 = null, input = new ButtonInput(), mults = null, yards = null) {
@@ -210,7 +213,7 @@ export default class Game {
   }
 
   fillMults () {
-    this.mults = [4, 4, 4, 3]
+    this.mults = engineFreshMults()
   }
 
   async decMults (p = null) {
@@ -280,7 +283,7 @@ export default class Game {
   }
 
   fillYards () {
-    this.yards = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    this.yards = engineFreshYards()
   }
 
   callTime (p) {

@@ -26,7 +26,14 @@ export type {
 } from "./types.js";
 
 export { reduce, reduceMany, type ReduceResult } from "./reducer.js";
-export { initialState, opp, emptyHand, emptyStats } from "./state.js";
+export {
+  initialState,
+  opp,
+  emptyHand,
+  emptyStats,
+  freshDeckMultipliers,
+  freshDeckYards,
+} from "./state.js";
 export { type Rng, seededRng } from "./rng.js";
 
 export { matchupQuality, MATCHUP, MULTI } from "./rules/matchup.js";
