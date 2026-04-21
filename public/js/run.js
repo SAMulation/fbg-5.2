@@ -192,6 +192,18 @@ export default class Run {
       this.channel.bind('pusher:subscription_succeeded', resolve)
       this.channel.bind('pusher:subscription_error', reject)
     })
+
+    // The DO sends the current state on connect if a game is already
+    // in progress (reconnect / rejoin). Race: await the first state
+    // broadcast with a short timeout; if it arrives and phase is past
+    // INIT, this is a rejoin and we skip the team-exchange + init.
+    const rejoinState = await this._awaitRejoinState(300)
+    if (rejoinState && rejoinState.phase !== 'INIT') {
+      await this._rehydrateFromState(game, rejoinState)
+      console.log('[server] rejoined at phase:', rejoinState.phase)
+      return
+    }
+
     this.loadingPanelText.innerText = 'Waiting for other player...'
 
     // Exchange setup. The OnlineChannel's pending-message buffer ensures
@@ -254,7 +266,102 @@ export default class Run {
     }
     const afterStart = await this.channel.nextState()
     game.engineState = afterStart.state
+
+    // Persist a resume token so a tab refresh or device switch can
+    // rejoin via the Durable Object. Cleared on GAME_OVER.
+    this._stashResumeToken(game)
+
     console.log('[server] setup complete, phase:', afterStart.state.phase)
+  }
+
+  /**
+   * Await the first state broadcast briefly after subscription. If the
+   * Durable Object already had a game in progress, it sends current state
+   * immediately on connect — that's the rejoin signal.
+   */
+  async _awaitRejoinState (timeoutMs) {
+    return new Promise((resolve) => {
+      let done = false
+      const onState = (payload) => {
+        if (done) return
+        done = true
+        this.channel.unbind('server-state', onState)
+        resolve(payload.state)
+      }
+      this.channel.bind('server-state', onState)
+      setTimeout(() => {
+        if (done) return
+        done = true
+        this.channel.unbind('server-state', onState)
+        resolve(null)
+      }, timeoutMs)
+    })
+  }
+
+  /**
+   * Populate v5.1's Game object from a mid-game server state so the
+   * existing gameLoop can take over where we left off. Uses TEAMS[] to
+   * rebuild the Player objects from abbreviations alone.
+   */
+  async _rehydrateFromState (game, state) {
+    const { TEAMS } = await import('./teams.js')
+    const Team = (await import('./team.js')).default
+
+    const byAbrv = (abrv) => {
+      const found = TEAMS.find(t => t.abrv === abrv)
+      return found ? new Team(found) : game.players[1].team
+    }
+
+    game.engineState = state
+    game.players[1] = new Player(null, game, byAbrv(state.players[1].team.id))
+    game.players[2] = new Player(null, game, byAbrv(state.players[2].team.id))
+    game.players[1].score = state.players[1].score
+    game.players[2].score = state.players[2].score
+
+    this._syncFieldFrom(game, state)
+    game.qtr = state.clock.quarter
+    game.qtrLength = state.clock.quarterLengthMinutes
+    game.currentTime = state.clock.secondsRemaining / 60
+    game.status = this._statusFromPhase(state.phase)
+    game.recFirst = state.openingReceiver ?? game.offNum
+    game.away = game.opp(game.home)
+
+    this.loadingPanelText.innerText = 'Resuming game...'
+  }
+
+  _statusFromPhase (phase) {
+    switch (phase) {
+      case 'KICKOFF':
+      case 'OT_START':
+        return -3 // KICKOFF
+      case 'REG_PLAY':
+      case 'OT_PLAY':
+        return REG
+      case 'TWO_PT_CONV':
+        return 20 // TWO_PT
+      case 'PAT_CHOICE':
+        return 101 // TD state, endPlay will route to pat()
+      case 'GAME_OVER':
+        return LEAVE
+      default:
+        return REG
+    }
+  }
+
+  _stashResumeToken (game) {
+    if (!game.isMultiplayer()) return
+    try {
+      window.localStorage.setItem('fbg:onlineResume', JSON.stringify({
+        code: game.connection.gamecode,
+        me: game.me,
+        role: game.connection.host ? 'host' : 'remote',
+        savedAt: Date.now()
+      }))
+    } catch (e) { /* localStorage may be blocked — ignore */ }
+  }
+
+  _clearResumeToken () {
+    try { window.localStorage.removeItem('fbg:onlineResume') } catch (e) { /* ignore */ }
   }
 
   async playGame () {
@@ -1313,12 +1420,15 @@ export default class Run {
     const r = await this.channel.nextState()
     game.engineState = r.state
 
-    // GAME_OVER from server takes precedence — exit the gameLoop cleanly.
+    // GAME_OVER from server takes precedence — exit the gameLoop cleanly
+    // and drop the resume token so the next page load doesn't offer to
+    // rejoin a finished game.
     const gameOver = r.events.find(e => e.type === 'GAME_OVER')
     if (gameOver) {
       console.log('[server] GAME_OVER, winner=', gameOver.winner)
       game.statusOnExit = game.status
       game.status = LEAVE
+      this._clearResumeToken()
     }
   }
 

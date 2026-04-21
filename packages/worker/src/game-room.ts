@@ -92,12 +92,20 @@ export class GameRoom implements DurableObject {
 
     server.send(JSON.stringify({ type: "welcome", role }));
 
+    // Catch a newly-connected client up on current state if a game is
+    // already in progress. This is the server-side of reconnect / rejoin:
+    // if a player refreshes the tab (or joins late on another device),
+    // they receive the canonical state immediately and can resume.
+    if (this.game) {
+      server.send(JSON.stringify({
+        type: "state",
+        state: this.game.state,
+        events: [],
+      }));
+    }
+
     if (role === "remote") {
       this.broadcastExcept(server, { type: "peer-joined" });
-      // Catch the remote up on current state if the host already started a game.
-      if (this.game) {
-        server.send(JSON.stringify({ type: "state", state: this.game.state, events: [] }));
-      }
     }
 
     return new Response(null, { status: 101, webSocket: client });
