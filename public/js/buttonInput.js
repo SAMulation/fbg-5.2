@@ -139,7 +139,6 @@ export default class ButtonInput extends BaseInput {
             <p class="play-name">${this.legalChoices[i].name}</p>
           </div>`
 
-          console.log(temp)
           btn.innerHTML = temp
         } else {
         // This is the old styling style, works for yeses and noes
@@ -165,11 +164,13 @@ export default class ButtonInput extends BaseInput {
       game.run.alertMessage.innerText = msg
     }
 
+    console.log('[input] awaiting pick for p=' + p + ' type=' + (msg ? 'button' : '?'))
     buttons.forEach(button => {
       button.addEventListener('click', event => {
-        // Return play type
-        resolve(event.target.getAttribute('data-playType'))
-        if (event.target.getAttribute('data-playType') !== 'TO') {
+        const play = event.target.getAttribute('data-playType')
+        console.log('[input] picked', play, 'for p=' + p)
+        resolve(play)
+        if (play !== 'TO') {
           game.run.alertMessage.disabled = true
           event.target.parentElement.innerHTML = ''
         }
