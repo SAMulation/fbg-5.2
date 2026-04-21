@@ -1230,32 +1230,44 @@ export default class Run {
   };
 
   /**
-   * Server-authoritative play. Each client dispatches PICK_PLAY for its
-   * own player; the DO stages the first pick and resolves on the second,
-   * broadcasting state + events (incl. PLAY_RESOLVED). We drain broadcasts
-   * until the resolution arrives, then populate v5.1's game.thisPlay so
-   * endPlay's existing animation pipeline renders the outcome.
+   * Server-authoritative play. Offense dispatches right after picking;
+   * defense holds off until it sees offense's PLAY_CALLED event (so a
+   * 4th-down FG/PUNT from offense doesn't wrongly stage defense's pick
+   * for a future round).
+   *
+   * Drains broadcasts until a resolving event arrives, then populates
+   * v5.1's game.thisPlay so endPlay's existing animation pipeline
+   * renders the outcome.
    */
   async _serverPlayCycle (game) {
-    // Clear both players' current picks (defensive).
     game.players[1].currentPlay = null
     game.players[2].currentPlay = null
 
-    // Get the local player's play from the usual UI.
     const myPlay = await this.input.getInput(
       game, game.me, 'reg',
       game.players[game.me].team.name + ' pick your play...'
     )
     if (game.status === EXIT) return
-
     game.players[game.me].currentPlay = myPlay
-    this.channel.dispatchAction({ type: 'PICK_PLAY', player: game.me, play: myPlay })
 
-    // Show waiting message for the other player.
+    const amOffense = game.me === game.offNum
+
+    // Offense dispatches immediately (routing FG/PUNT via FOURTH_DOWN_CHOICE).
+    // Defense waits to see what offense did (see the defense-dispatch block
+    // inside the drain loop below).
+    let defenseDispatched = false
+    if (amOffense) {
+      this._dispatchOffensePick(game, myPlay)
+    }
+
     const otherP = game.opp(game.me)
     await alertBox(this, game.players[otherP].team.name + ' are picking their play...')
 
-    // Drain state broadcasts until the play resolves.
+    const RESOLVING_EVENTS = new Set([
+      'PLAY_RESOLVED', 'TOUCHDOWN', 'SAFETY', 'TURNOVER', 'TURNOVER_ON_DOWNS',
+      'FIELD_GOAL_GOOD', 'FIELD_GOAL_MISSED', 'PUNT'
+    ])
+
     let resolved = null
     while (!resolved) {
       const { state, events } = await this.channel.nextState()
@@ -1264,21 +1276,90 @@ export default class Run {
       const otherCall = events.find(e => e.type === 'PLAY_CALLED' && e.player === otherP)
       if (otherCall) game.players[otherP].currentPlay = otherCall.play
 
-      if (events.some(e => e.type === 'PLAY_RESOLVED' ||
-                           e.type === 'TOUCHDOWN' ||
-                           e.type === 'SAFETY' ||
-                           e.type === 'TURNOVER' ||
-                           e.type === 'TURNOVER_ON_DOWNS')) {
+      // Defense waited; now dispatch if we've seen offense play a regular
+      // card (not FG/PUNT which resolve unilaterally on the server).
+      if (!amOffense && !defenseDispatched) {
+        const offenseCalled = events.some(e => e.type === 'PLAY_CALLED' && e.player === game.offNum)
+        if (offenseCalled) {
+          this.channel.dispatchAction({ type: 'PICK_PLAY', player: game.me, play: myPlay })
+          defenseDispatched = true
+        }
+      }
+
+      if (events.some(e => RESOLVING_EVENTS.has(e.type))) {
         resolved = { state, events }
       }
     }
 
-    // Populate game.thisPlay from the resolved event so v5.1's endPlay
-    // animation pipeline has what it needs. calcDist's destructive
-    // normalization (see endPlay comment) mangles some rendering fields;
-    // game.thisPlay.dist is what drives the actual yardage, so that one
-    // must survive.
+    await this._applyServerResolution(game, resolved)
+  }
+
+  /**
+   * Offense's pick routing: SR/LR/SP/LP/TP/HM go via PICK_PLAY; FG/PUNT
+   * route via FOURTH_DOWN_CHOICE (engine rejects them as PICK_PLAY).
+   */
+  _dispatchOffensePick (game, play) {
+    if (play === 'FG') {
+      this.channel.dispatchAction({ type: 'FOURTH_DOWN_CHOICE', player: game.me, choice: 'fg' })
+    } else if (play === 'PUNT') {
+      this.channel.dispatchAction({ type: 'FOURTH_DOWN_CHOICE', player: game.me, choice: 'punt' })
+    } else {
+      this.channel.dispatchAction({ type: 'PICK_PLAY', player: game.me, play })
+    }
+  }
+
+  /**
+   * Apply a resolved play to v5.1's local game state. Covers the different
+   * event shapes: regular PLAY_RESOLVED, FG good/miss, punt, special plays
+   * (Hail Mary die, Big Play) that don't emit PLAY_RESOLVED but do shift
+   * ballOn in state.
+   */
+  async _applyServerResolution (game, resolved) {
     const playEvent = resolved.events.find(e => e.type === 'PLAY_RESOLVED')
+    const fgGood = resolved.events.some(e => e.type === 'FIELD_GOAL_GOOD')
+    const fgMiss = resolved.events.some(e => e.type === 'FIELD_GOAL_MISSED')
+    const isPunt = resolved.events.some(e => e.type === 'PUNT')
+    const isTD = resolved.events.some(e => e.type === 'TOUCHDOWN')
+    const isSafety = resolved.events.some(e => e.type === 'SAFETY')
+
+    if (fgGood) {
+      game.thisPlay.multiplier = '/'
+      game.thisPlay.multiplierCard = '/'
+      game.thisPlay.yardCard = '/'
+      game.thisPlay.quality = '/'
+      game.thisPlay.dist = 0
+      await alertBox(this, game.players[game.offNum].team.name + ' field goal is GOOD!')
+      // Sync authoritative scores, transition to kickoff.
+      this._syncScoresFrom(game, resolved.state)
+      if (!game.isOT()) game.status = -3 // pending kickoff
+      return
+    }
+
+    if (fgMiss) {
+      game.thisPlay.multiplier = '/'
+      game.thisPlay.multiplierCard = '/'
+      game.thisPlay.yardCard = '/'
+      game.thisPlay.quality = '/'
+      game.thisPlay.dist = 0
+      await alertBox(this, game.players[game.offNum].team.name + ' field goal is no good...')
+      // Possession flips per resolveFieldGoal.
+      this._syncFieldFrom(game, resolved.state)
+      return
+    }
+
+    if (isPunt && !playEvent) {
+      // Punt or kickoff-style event with no play-card resolution.
+      game.thisPlay.multiplier = '/'
+      game.thisPlay.multiplierCard = '/'
+      game.thisPlay.yardCard = '/'
+      game.thisPlay.quality = '/'
+      game.thisPlay.dist = 0
+      await alertBox(this, game.players[game.offNum].team.name + ' punt is away...')
+      this._syncFieldFrom(game, resolved.state)
+      this._syncScoresFrom(game, resolved.state)
+      return
+    }
+
     if (playEvent) {
       game.thisPlay.multiplier = playEvent.multiplier.value
       game.thisPlay.multiplierCard = {
@@ -1289,8 +1370,7 @@ export default class Run {
       game.thisPlay.quality = playEvent.matchupQuality
       game.thisPlay.dist = playEvent.yardsGained
     } else {
-      // Specials (Hail Mary die, Big Play, etc) don't emit PLAY_RESOLVED.
-      // The state delta tells us where the ball ended up; derive dist.
+      // Hail Mary / Big Play / etc — derive dist from state delta.
       const prevBallOn = game.spot
       const newBallOn = resolved.state.field.ballOn
       const flipped = resolved.state.field.offense !== game.offNum
@@ -1301,12 +1381,84 @@ export default class Run {
       game.thisPlay.dist = flipped ? (100 - newBallOn) - prevBallOn : newBallOn - prevBallOn
     }
 
-    // Reflect events that push v5.1 into a specific status.
-    if (resolved.events.some(e => e.type === 'TOUCHDOWN')) {
-      game.status = 101 // TD
-    } else if (resolved.events.some(e => e.type === 'SAFETY')) {
-      game.status = 102 // SAFETY
+    if (isTD) game.status = 101
+    else if (isSafety) game.status = 102
+  }
+
+  _syncFieldFrom (game, engineState) {
+    game.spot = engineState.field.ballOn
+    game.firstDown = engineState.field.firstDownAt
+    game.down = engineState.field.down
+    game.offNum = engineState.field.offense
+    game.defNum = game.opp(game.offNum)
+  }
+
+  _syncScoresFrom (game, engineState) {
+    game.players[1].score = engineState.players[1].score
+    game.players[2].score = engineState.players[2].score
+  }
+
+  /**
+   * Server-authoritative PAT. Only the offense dispatches; the other
+   * client is spectating. Returns true if the PAT is fully handled here
+   * (kick path). Returns false if we should fall through to v5.1's local
+   * 2pt flow (engine's 2pt path needs more wiring before we can own it).
+   */
+  async _serverPat (game) {
+    const offense = game.offNum
+    const amOffense = game.me === offense
+
+    // Offense picks: 'K' = kick, '2P' = two-point.
+    let selection = '2P'
+    if (game.qtr < 7) {
+      if (amOffense) {
+        selection = await this.input.getInput(
+          game, offense, 'pat',
+          game.players[offense].team.name + ' pick PAT type...'
+        )
+      }
     }
+    if (game.status === EXIT) return true
+
+    // For 2pt, defer to v5.1's local flow for now (engine 2pt TODO).
+    if (selection === '2P') {
+      if (amOffense) {
+        this.channel.trigger('client-value', { value: '2P' })
+      }
+      // Let v5.1's pat handle the 2pt setup on both clients. Returning
+      // false here is awkward because we've already consumed the local
+      // input; so we MANUALLY apply the 2pt state changes that v5.1 does.
+      game.spot = 98
+      if (game.changeTime !== TIMEOUT) game.changeTime = TWOPT
+      game.twoPtConv = true
+      await setBallSpot(this)
+      return true
+    }
+
+    // Kick path: offense dispatches PAT_CHOICE, both sides wait for PAT_GOOD.
+    if (amOffense) {
+      this.channel.dispatchAction({ type: 'PAT_CHOICE', player: offense, choice: 'kick' })
+    }
+    let resolved = null
+    while (!resolved) {
+      const { state, events } = await this.channel.nextState()
+      game.engineState = state
+      if (events.some(e => e.type === 'PAT_GOOD')) {
+        resolved = { state, events }
+      }
+    }
+
+    // Animate the PAT kick. scoreChange(1) does both the animation and the
+    // +1 arithmetic on v5.1's side; the server already added 1 on its side
+    // so both ends match without an extra sync.
+    await this.fgAnimation(game, 22, true)
+    await this.scoreChange(game, offense, 1)
+    if (!game.isOT()) {
+      game.status = KICKOFF
+    } else {
+      game.status = REG
+    }
+    return true
   }
 
   _mcardNum (card) {
@@ -2948,6 +3100,17 @@ export default class Run {
   };
 
   async pat (game) {
+    // Server-authoritative PAT: offense dispatches PAT_CHOICE; engine awards
+    // +1 on a kick (auto-good in v6) or transitions to TWO_PT_CONV on 2pt.
+    // 2pt resolution via the engine needs a small reducer tweak (PICK_PLAY
+    // in TWO_PT_CONV phase must go through resolveTwoPointConversion); for
+    // now we let v5.1's local flow handle 2pt and only server-authorize the
+    // kick path. See docs/PHASE3.md.
+    if (this._inServerAuthMode(game)) {
+      const handled = await this._serverPat(game)
+      if (handled) return
+    }
+
     const oName = game.players[game.offNum].team.name
     let selection = '2P' // Default in 3OT+
 
