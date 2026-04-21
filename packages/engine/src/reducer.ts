@@ -28,6 +28,7 @@ import {
   resolveOffensiveTrickPlay,
   resolvePunt,
   resolveSamePlay,
+  resolveTwoPointConversion,
 } from "./rules/specials/index.js";
 import {
   endOvertimePossession,
@@ -168,6 +169,24 @@ function reduceCore(state: GameState, action: Action, rng: Rng): ReduceResult {
       // Both teams have picked — resolve.
       if (pendingPick.offensePlay && pendingPick.defensePlay) {
         const stateWithPick: GameState = { ...state, pendingPick };
+
+        // 2-point conversion: PICK_PLAY in TWO_PT_CONV phase routes to a
+        // dedicated resolver (different scoring + transition than regular
+        // play). Restricted to regular plays — engine intentionally
+        // doesn't allow HM/TP exotic flows on the conversion.
+        if (
+          state.phase === "TWO_PT_CONV" &&
+          isRegularPlay(pendingPick.offensePlay) &&
+          isRegularPlay(pendingPick.defensePlay)
+        ) {
+          const tp = resolveTwoPointConversion(
+            stateWithPick,
+            pendingPick.offensePlay,
+            pendingPick.defensePlay,
+            rng,
+          );
+          return { state: tp.state, events: [...events, ...tp.events] };
+        }
 
         // Hail Mary by offense — resolves immediately, defense pick ignored.
         if (pendingPick.offensePlay === "HM") {

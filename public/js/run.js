@@ -21,6 +21,7 @@ import {
 } from './engine.js'
 import { buildEngineState, replayRng } from './engineBridge.js'
 import { canResolveRegularViaEngine, resolveRegularViaEngine } from './engineRunner.js'
+import { animateResolution } from './animator.js'
 import { alertBox, sleep, setBallSpot, setSpot, animationSimple, animationWaitForCompletion, animationWaitThenHide, animationPrePick, animationPostPick, resetBoardContainer, firstDownLine } from './graphics.js'
 
 export default class Run {
@@ -1291,6 +1292,34 @@ export default class Run {
     }
 
     await this._applyServerResolution(game, resolved)
+    await this._serverTick(game, 30)
+  }
+
+  /**
+   * Tick the server clock so the engine's GameState advances toward
+   * quarter-end / halftime / GAME_OVER. Only the host dispatches; both
+   * clients receive the broadcast and apply it.
+   *
+   * v5.1's local timeChanger still runs in endPlay and continues to drive
+   * the visual clock — that's intentional during the transition. The
+   * server clock is the source of truth for "is the game over" only.
+   * Once we collapse v5.1, server clock drives the UI directly.
+   */
+  async _serverTick (game, seconds) {
+    if (!this._inServerAuthMode(game)) return
+    if (game.connection.host) {
+      this.channel.dispatchAction({ type: 'TICK_CLOCK', seconds })
+    }
+    const r = await this.channel.nextState()
+    game.engineState = r.state
+
+    // GAME_OVER from server takes precedence — exit the gameLoop cleanly.
+    const gameOver = r.events.find(e => e.type === 'GAME_OVER')
+    if (gameOver) {
+      console.log('[server] GAME_OVER, winner=', gameOver.winner)
+      game.statusOnExit = game.status
+      game.status = LEAVE
+    }
   }
 
   /**
@@ -1368,10 +1397,10 @@ export default class Run {
       game.thisPlay.dist = flipped ? (100 - newBallOn) - prevBallOn : newBallOn - prevBallOn
     }
 
-    // Narrate the result with a lean alert (replaces v5.1's multi-stage
-    // reportPlay animation, which doesn't play well with server-driven
-    // state). An event-driven animator can restore the fancy reveal later.
-    await this._narratePlayResolution(game, resolved)
+    // Walk the resolved event stream through the new animator (Phase 4
+    // Session 1). Replaces the alert-only narration; restores the
+    // play-card / multiplier / yards card reveal driven by server events.
+    await animateResolution(this, game, resolved.events, resolved.state)
 
     if (isTD) {
       game.status = 101
@@ -1390,37 +1419,7 @@ export default class Run {
     }
   }
 
-  async _narratePlayResolution (game, resolved) {
-    const playEvent = resolved.events.find(e => e.type === 'PLAY_RESOLVED')
-    const offName = game.players[game.offNum].team.name
-    const defName = game.players[game.defNum].team.name
-    const p1 = game.players[game.offNum].currentPlay
-    const p2 = game.players[game.defNum].currentPlay
-    const firstDown = resolved.events.some(e => e.type === 'FIRST_DOWN')
-    const turnoverDowns = resolved.events.some(e => e.type === 'TURNOVER_ON_DOWNS')
-    const interception = resolved.events.some(e => e.type === 'TURNOVER' && e.reason === 'interception')
-    const fumble = resolved.events.some(e => e.type === 'TURNOVER' && e.reason === 'fumble')
-    const safety = resolved.events.some(e => e.type === 'SAFETY')
-    const td = resolved.events.some(e => e.type === 'TOUCHDOWN')
-
-    let line
-    if (playEvent) {
-      const yardsStr = playEvent.yardsGained > 0
-        ? 'a ' + playEvent.yardsGained + '-yard gain'
-        : playEvent.yardsGained < 0 ? 'a ' + Math.abs(playEvent.yardsGained) + '-yard loss' : 'no gain'
-      line = p1 + ' vs ' + p2 + ': ' + yardsStr + '.'
-    } else {
-      line = p1 + ' vs ' + p2 + '.'
-    }
-    await alertBox(this, line)
-
-    if (td) await alertBox(this, offName + ' — TOUCHDOWN!')
-    else if (safety) await alertBox(this, defName + ' — SAFETY!')
-    else if (interception) await alertBox(this, defName + ' intercepted the ball!')
-    else if (fumble) await alertBox(this, defName + ' recovered a fumble!')
-    else if (turnoverDowns) await alertBox(this, 'Turnover on downs.')
-    else if (firstDown) await alertBox(this, 'First down!')
-  }
+  // _narratePlayResolution removed — replaced by animator.js (Phase 4 S1).
 
   _syncFieldFrom (game, engineState) {
     game.spot = engineState.field.ballOn
