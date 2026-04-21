@@ -77,32 +77,64 @@ custom domain (e.g. `footbored.com`) in the Cloudflare dashboard.
 After first deploy, subsequent `git push` → `npm run deploy` from CI
 (or local) ships in ~10s. Free tier easily covers low-volume play.
 
-## Session 2 (next): Server authority
+## Session 2 step 1 (done): DO is engine-authoritative
 
-The scaffolding for server-authoritative play is already in
-[`game-room.ts`](../packages/worker/src/game-room.ts):
+- [`game-room.ts`](../packages/worker/src/game-room.ts) imports
+  `@fbg/engine` and holds the canonical `GameState` per room.
+- Protocol:
+  - `C -> S  { type: "init", setup: { team1, team2, quarterLengthMinutes } }`
+  - `C -> S  { type: "action", action }` — `Action` from `@fbg/engine`
+  - `S -> C  { type: "state", state, events }` — broadcast post-reduce
+  - Legacy `{ type: "relay", payload }` still forwarded so v5.1 client works
+- Per-game seed + full action log persisted to DO storage. Games are
+  replayable from `(seed, actions[])`.
+- Smoke test: [`smoke-authority.mjs`](../packages/worker/smoke-authority.mjs)
+  drives INIT + START_GAME + COIN_TOSS_CALL, asserts both clients
+  receive identical state. Passes.
 
-- `engineState: GameState | null` — mirror of the room's engine state,
-  persisted via `state.storage`.
-- `applyAction(action)` stub — will load `@fbg/engine`, call
-  `reduce(engineState, action, rng)`, persist, broadcast events.
-- New `{ type: "action" }` message type handled; client just doesn't
-  send it yet.
+## Session 2 step 2 (next): client rewire
 
-To flip the switch:
+The DO is now waiting to serve actions. The remaining work is on the
+browser side.
 
-1. Implement `applyAction` in the DO: import `reduce` / `initialState` /
-   `seededRng` from `@fbg/engine`, hold the canonical `GameState`, run
-   actions through it.
-2. Rewrite [`public/js/run.js`](../public/js/run.js)'s play flow as an
-   event-driven animator. Instead of computing locally via
-   `engineRunner.js`, send `{ type: "action" }` messages and animate
-   the returned `events` array. This is the "collapse" noted in
-   [PHASE2.md](PHASE2.md#5-the-final-collapse--phase-3-territory).
-3. Add an action log to DO storage so games can be resumed and
-   replayed.
-4. Delete `engineRunner.js` / `engineBridge.js` / the `Game`/`Run`/
-   `Player` classes. The client becomes a thin event consumer.
+**Goal**: for online multiplayer only (single-player / local co-op
+keep using the client-side engine path as-is), replace v5.1's
+handshake + peer-to-peer RNG with server-authoritative dispatch.
 
-After session 2, FBG is cheat-proof online multiplayer with replay,
-resume, and spectator mode as downstream freebies.
+**Concrete tasks**:
+
+1. **Setup phase**. Replace the v5.1 handshake (`ping` → `pong` →
+   team exchange → config exchange in [run.js lines 220-250](../public/js/run.js#L220-L250))
+   with a pair of `{ type: "setup" }` messages from each side, then
+   one side sends `{ type: "init", setup }` to the DO. DO assembles
+   state, broadcasts. Both clients receive state, populate their
+   local `Game` object.
+
+2. **Play dispatch**. In [run.js `doPlay`](../public/js/run.js),
+   when multiplayer, send `{ type: "action", action: { type: "PICK_PLAY", player, play } }`
+   instead of calling `engineRunner.resolveRegularViaEngine`. Wait
+   for the DO's `state` broadcast. Apply the engine `GameState` back
+   to `game.thisPlay` / `game.spot` / etc via
+   [`engineBridge.applyEngineStateToGame`](../public/js/engineBridge.js).
+
+3. **Other dispatches**. `COIN_TOSS_CALL`, `RECEIVE_CHOICE`,
+   `PAT_CHOICE`, `FOURTH_DOWN_CHOICE`, `CALL_TIMEOUT`,
+   `RESOLVE_KICKOFF`, `TICK_CLOCK` — wrap each existing UI handler
+   so that in multiplayer mode it sends an action rather than
+   running locally.
+
+4. **Delete dead RNG**. Once online multiplayer is fully action-driven,
+   `remoteUtils.js`'s multiplayer RNG sync (and v5.1's
+   `sendInputToRemote`/`receiveInputFromRemote`) is no longer called.
+   `engineRunner.js` and `engineBridge.js` stop being needed for
+   online play (still used for single-player).
+
+5. **Event animator (stretch)**. Walk the `events[]` from each
+   broadcast and play the matching animation. This is the true
+   "collapse" from [PHASE2.md](PHASE2.md#5-the-final-collapse--phase-3-territory).
+   Can be deferred — step 2 above still works by applying state and
+   letting v5.1's animations run from state deltas.
+
+After step 2, FBG online multiplayer is fully server-authoritative.
+Cheat-proof, replayable, and friends-across-the-world works with
+the same feel as v5.1.
