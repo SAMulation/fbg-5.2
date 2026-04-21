@@ -122,14 +122,16 @@ export const realSetTimeout = globalThis.setTimeout.bind(globalThis)
 export const realClearTimeout = globalThis.clearTimeout.bind(globalThis)
 
 /**
- * Short-circuit setTimeout for in-game sleeps. Anything ≤ maxMs
- * resolves on next microtask; bigger timers still work.
+ * Short-circuit setTimeout for in-game sleeps in the [minMs, maxMs]
+ * band. Very short timers (< minMs) are left alone so Node's undici
+ * fetch internals (which use 0-ms scheduling) aren't starved. Very
+ * long timers (> maxMs) are assumed to be watchdogs and also pass
+ * through.
  */
-export function installFastTimers (maxMs = 3100) {
+export function installFastTimers (minMs = 50, maxMs = 3100) {
   const origSetTimeout = globalThis.setTimeout
   globalThis.setTimeout = (fn, ms, ...rest) => {
-    if (ms !== undefined && ms <= maxMs) {
-      // Still async — preserves event-loop ordering — but instant.
+    if (typeof ms === 'number' && ms >= minMs && ms <= maxMs) {
       Promise.resolve().then(() => { try { fn(...rest) } catch (e) { console.error(e) } })
       return 0
     }
@@ -170,17 +172,10 @@ export function setupDomStub () {
   globalThis.window.localStorage = new LocalStorageStub()
 
   globalThis.localStorage = globalThis.window.localStorage
-  // navigator is a read-only getter in Node 22+. Skip it — nothing on the
-  // hot path reaches navigator.clipboard in the driver.
-  globalThis.HTMLElement = class HTMLElement {}
-  globalThis.Element = class Element {}
-  globalThis.Node = class Node {}
-  globalThis.location = globalThis.location || { search: '', protocol: 'http:', host: 'localhost:3000', port: '3000' }
-
-  // Optional: fake CustomEvent / Event
-  if (!globalThis.Event) {
-    globalThis.Event = class Event {
-      constructor (type) { this.type = type }
-    }
-  }
+  // Don't overwrite Node globals used by undici fetch / AbortController:
+  //   Event, EventTarget, Node (some versions), AbortSignal
+  // Only define if missing, and don't touch navigator (read-only in Node 22+).
+  if (!globalThis.HTMLElement) globalThis.HTMLElement = class HTMLElement {}
+  if (!globalThis.Element) globalThis.Element = class Element {}
+  if (!globalThis.location) globalThis.location = { search: '', protocol: 'http:', host: 'localhost:3000', port: '3000' }
 }

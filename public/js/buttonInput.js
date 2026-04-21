@@ -166,15 +166,23 @@ export default class ButtonInput extends BaseInput {
     }
 
     fbgLog('input', 'awaiting pick for p=' + p + ' type=' + (msg ? 'button' : '?'))
+    const onTimeoutClick = () => {
+      fbgLog('input', 'picked TO for p=' + p)
+      timeout.removeEventListener('click', onTimeoutClick)
+      timeout.disabled = true
+      resolve('TO')
+    }
+    if (timeout.innerText && !timeout.disabled) {
+      timeout.addEventListener('click', onTimeoutClick)
+    }
     buttons.forEach(button => {
       button.addEventListener('click', event => {
         const play = event.target.getAttribute('data-playType')
         fbgLog('input', 'picked', play, 'for p=' + p)
+        timeout.removeEventListener('click', onTimeoutClick)
         resolve(play)
-        if (play !== 'TO') {
-          game.run.alertMessage.disabled = true
-          event.target.parentElement.innerHTML = ''
-        }
+        game.run.alertMessage.disabled = true
+        event.target.parentElement.innerHTML = ''
         timeout.disabled = true
       })
     })

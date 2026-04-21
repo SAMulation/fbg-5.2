@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "run": "node run.mjs",
-    "local": "node driver-local.mjs"
+    "local": "node driver-local.mjs",
+    "online": "node driver-online.mjs"
   },
   "dependencies": {
     "ws": "^8.20.0"

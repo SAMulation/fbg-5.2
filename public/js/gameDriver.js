@@ -295,7 +295,7 @@ export class GameDriver {
     this._resetPlayUI()
 
     fbgLog('driver', 'awaiting local pick p=' + this.me)
-    const myPlay = await this.run.input.getInput(
+    const myPlay = await this._promptPlayWithTimeouts(
       game, this.me, 'reg',
       game.players[this.me].team.name + ' pick your play...'
     )
@@ -341,8 +341,11 @@ export class GameDriver {
       }
     }
 
+    fbgLog('driver', 'drain done, animating')
     await this._animateAndScore(resolved.events, resolved.state)
+    fbgLog('driver', 'animate done, ticking')
     await this._tickClock(30)
+    fbgLog('driver', 'tick done')
   }
 
   async _doPlayLocal () {
@@ -354,7 +357,7 @@ export class GameDriver {
 
     // Offense picks first.
     fbgLog('driver', 'local: awaiting offense (p' + offense + ')')
-    const offPlay = await this.run.input.getInput(
+    const offPlay = await this._promptPlayWithTimeouts(
       game, offense, 'reg',
       game.players[offense].team.name + ' pick your play...'
     )
@@ -380,7 +383,7 @@ export class GameDriver {
 
     // Now defense.
     fbgLog('driver', 'local: awaiting defense (p' + defense + ')')
-    const defPlay = await this.run.input.getInput(
+    const defPlay = await this._promptPlayWithTimeouts(
       game, defense, 'reg',
       game.players[defense].team.name + ' pick your play...'
     )
@@ -393,6 +396,44 @@ export class GameDriver {
 
     await this._animateAndScore(allEvents, this.state)
     await this._tickClock(30)
+  }
+
+  /**
+   * Prompt a player for a play. If they call a timeout ('TO'), dispatch
+   * CALL_TIMEOUT fire-and-forget and re-prompt. We intentionally don't
+   * await the TIMEOUT_CALLED broadcast here — in online play, other
+   * state broadcasts (opponent's PICK_PLAY) could arrive in between,
+   * and consuming them here would starve the caller's drain loop. The
+   * drain loop simply ignores TIMEOUT_CALLED events (not terminal, not
+   * pendingCleared), so broadcasts flow through correctly.
+   */
+  async _promptPlayWithTimeouts (game, p, type, msg) {
+    while (true) {
+      const pick = await this.run.input.getInput(game, p, type, msg)
+      if (pick !== 'TO') return pick
+      if (game.players[p].timeouts <= 0) {
+        fbgLog('driver', 'TO picked with no timeouts remaining; re-prompting')
+        continue
+      }
+      fbgLog('driver', 'timeout called by p=' + p)
+      this.channel.dispatchAction({ type: 'CALL_TIMEOUT', player: p })
+      if (this.isLocal) {
+        // Local mode: the broadcast queues up in stateQueue and would
+        // confuse the caller's next `_nextState()`. Consume it here.
+        const { state } = await this._nextState()
+        this._applyStateToGame(state)
+        await alertBox(this.run, game.players[p].team.name +
+          ' called a timeout. ' + state.players[p].timeouts + ' remaining.')
+      } else {
+        // Online: fire-and-forget. The drain loop absorbs TIMEOUT_CALLED
+        // broadcasts naturally (not terminal, not pendingCleared).
+        // Decrement optimistically to keep the UI consistent until the
+        // next state broadcast reconciles.
+        game.players[p].timeouts = Math.max(0, (game.players[p].timeouts || 0) - 1)
+        await alertBox(this.run, game.players[p].team.name +
+          ' called a timeout. ' + game.players[p].timeouts + ' remaining.')
+      }
+    }
   }
 
   _resetPlayUI () {
@@ -493,10 +534,12 @@ export class GameDriver {
     // retriggers QUARTER_ENDED → startOvertime and spirals into an
     // infinite OT_START/OT_PLAY loop. Game-over also has no clock.
     if (this.state.clock.quarter > 4 || this.state.phase === 'GAME_OVER') return
+    fbgLog('driver', 'tickClock start host=' + this.host)
     if (this.host) {
       this.channel.dispatchAction({ type: 'TICK_CLOCK', seconds })
     }
     const { state, events } = await this._nextState()
+    fbgLog('driver', 'tickClock got: ' + events.map(e => e.type).join(','))
     this._applyStateToGame(state)
 
     if (events.some(e => e.type === 'TWO_MINUTE_WARNING')) {

@@ -170,8 +170,20 @@ class OnlineChannel {
    * Returns a promise that resolves with the next 'server-state' broadcast.
    * Use `await channel.nextState()` after dispatchAction to know when
    * the DO has applied the reduce.
+   *
+   * If broadcasts arrived before any handler was bound they queue in
+   * `pending`. A one-shot listener bound via bind() would receive ALL
+   * queued messages in succession but only fire once — subsequent
+   * messages would vanish. So we pop from the queue BEFORE binding
+   * instead of relying on the bind() drain.
    */
   nextState () {
+    const queue = this.pending.get('server-state')
+    if (queue && queue.length) {
+      const payload = queue.shift()
+      if (queue.length === 0) this.pending.delete('server-state')
+      return Promise.resolve(payload)
+    }
     return new Promise((resolve) => {
       const onOnce = (payload) => {
         this.unbind('server-state', onOnce)

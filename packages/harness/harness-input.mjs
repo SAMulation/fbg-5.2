@@ -39,8 +39,16 @@ function handFor (game, p) {
 
 export const randomStrategy = {
   name: 'random',
+  // Set >0 to occasionally pick TO during 'reg' picks — exercises the
+  // timeout re-prompt loop in GameDriver.
+  timeoutProbability: 0.05,
   pick (game, p, type) {
     if (type === 'reg') {
+      // Occasional timeout call (if player has any left). Driver should
+      // handle it by dispatching CALL_TIMEOUT + re-prompting.
+      const toLeft = game.engineState?.players?.[p]?.timeouts ?? 0
+      if (toLeft > 0 && Math.random() < this.timeoutProbability) return 'TO'
+
       const hand = handFor(game, p)
       const plays = ['SR', 'LR', 'SP', 'LP', 'TP']
       const legal = plays.filter((pl) => (hand[pl] ?? 0) > 0)
