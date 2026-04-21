@@ -1,0 +1,17 @@
+{
+  "name": "@fbg/engine",
+  "version": "0.0.1",
+  "description": "Pure FootBored game engine — no DOM, no network, no I/O.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
