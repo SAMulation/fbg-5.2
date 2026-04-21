@@ -54,11 +54,16 @@ jobs:
       - name: Run engine tests
         run: npm run test:engine
 
-      # ─── Rebuild the browser bundle ──────────────────────────────────
+      # ─── Build engine for both consumers ─────────────────────────────
+      # The Worker imports `@fbg/engine` -> dist/index.js (tsc output).
+      # The browser loads /js/engine.js (esbuild bundle). We need both.
+      - name: Build engine TS types + dist (for Worker import)
+        run: npm run build:engine:types
+
       # public/js/engine.js is committed but we rebuild in CI so a drifted
       # local bundle can't ship stale. This also catches engine changes
       # that weren't re-bundled locally before push.
-      - name: Build engine browser bundle
+      - name: Build engine browser bundle (for static asset)
         run: npm run build:engine
 
       # ─── Deploy to Cloudflare ────────────────────────────────────────
