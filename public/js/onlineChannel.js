@@ -32,6 +32,13 @@ function wsBase () {
 class OnlineChannel {
   constructor () {
     this.handlers = new Map()
+    // Relay messages that arrive before a handler has been bound get
+    // queued here, keyed by event name. Drained on first bind(event, cb).
+    // This fixes the subtle timing bug where the host's handshake "ping"
+    // can arrive at the remote BEFORE the remote's run.js has called
+    // channel.bind('client-value') — which happens late in the join flow,
+    // after the user has clicked through team selection.
+    this.pending = new Map()
     this.ws = null
     this.ready = false
     this.code = null
@@ -40,7 +47,12 @@ class OnlineChannel {
 
   _emit (event, payload) {
     const set = this.handlers.get(event)
-    if (!set) return
+    if (!set || set.size === 0) {
+      // No listener yet — queue for when bind() is called.
+      if (!this.pending.has(event)) this.pending.set(event, [])
+      this.pending.get(event).push(payload)
+      return
+    }
     for (const cb of set) {
       try { cb(payload) } catch (e) { console.error('channel handler error:', e) }
     }
@@ -49,6 +61,14 @@ class OnlineChannel {
   bind (event, cb) {
     if (!this.handlers.has(event)) this.handlers.set(event, new Set())
     this.handlers.get(event).add(cb)
+    // Drain any messages that arrived before this handler existed.
+    const buffered = this.pending.get(event)
+    if (buffered && buffered.length) {
+      this.pending.delete(event)
+      for (const payload of buffered) {
+        try { cb(payload) } catch (e) { console.error('channel handler error:', e) }
+      }
+    }
     return this
   }
 
