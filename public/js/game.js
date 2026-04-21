@@ -2,18 +2,16 @@ import Player from './player.js'
 import Play from './play.js'
 import Run from './run.js'
 import ButtonInput from './buttonInput.js'
-import Utils from './remoteUtils.js'
 import { CHANGE, INIT, INIT_OTC } from './defaults.js'
 import PromptInput from './promptInput.js'
 import FormInput from './formInput.js'
-// Engine: card-deck primitives. The async wrapper around Utils.randInt is
-// preserved so multiplayer RNG-sync continues to work; the deck-state math
-// itself is delegated to the engine via a one-shot replay-rng adapter.
+// Session 4: the engine owns the authoritative deck state (via
+// GameState.deck) and drives all draws through `reduce`. Game.js only
+// seeds the v5.1-style `this.mults` / `this.yards` arrays so legacy
+// UI spots that still read them don't NPE; they're never drawn from.
 import {
   freshDeckMultipliers as engineFreshMults,
-  freshDeckYards as engineFreshYards,
-  drawMultiplier as engineDrawMultiplier,
-  drawYards as engineDrawYards
+  freshDeckYards as engineFreshYards
 } from './engine.js'
 
 export default class Game {
@@ -220,42 +218,6 @@ export default class Game {
 
   fillMults () {
     this.mults = engineFreshMults()
-  }
-
-  // Pre-fetches random indices async (so multiplayer Pusher-RNG sync still
-  // works), then replays them through the pure engine for the actual deck
-  // arithmetic + reshuffle. The engine is the single source of truth for the
-  // result; v5.1 just owns the random source.
-  // Pre-fetches random indices async (so multiplayer Pusher-RNG sync still
-  // works — the `p` arg routes the draw through the right player), then
-  // replays them through the pure engine for the actual deck arithmetic +
-  // reshuffle. The engine is the source of truth for the result.
-  async _drawWithReplay (deckKey, randomMax, drawFn, p) {
-    const indices = []
-    while (true) {
-      const i = await Utils.randInt(0, randomMax, this, p)
-      indices.push(i)
-      if (this[deckKey][i] > 0) break
-    }
-    const replayRng = {
-      intBetween: () => indices.shift() ?? 0,
-      coinFlip: () => 'heads',
-      d6: () => 1
-    }
-    const result = drawFn({ multipliers: this.mults, yards: this.yards }, replayRng)
-    this.mults = result.deck.multipliers
-    this.yards = result.deck.yards
-    return result
-  }
-
-  async decMults (p = null) {
-    const result = await this._drawWithReplay('mults', 3, engineDrawMultiplier, p)
-    return { card: result.card, num: result.index + 1 }
-  }
-
-  async decYards (p = null) {
-    const result = await this._drawWithReplay('yards', 9, engineDrawYards, p)
-    return result.card
   }
 
   fillYards () {

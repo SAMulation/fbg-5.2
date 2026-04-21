@@ -8,7 +8,6 @@ import ButtonInput from './buttonInput.js'
 import PromptInput from './promptInput.js'
 import FormInput from './formInput.js'
 import { TEAMS } from './teams.js'
-import Utils from './remoteUtils.js'
 import { animationWaitForCompletion, animationWaitThenHide } from './graphics.js'
 import { MODAL_MESSAGES } from './defaults.js'
 import { createOnlinePusher } from './onlineChannel.js'
@@ -218,7 +217,7 @@ const setTeamLists = async lists => {
       list.appendChild(el)
     }
     // list.selectedIndex = list.id === 'p1Team' ? 24 : 2
-    list.selectedIndex = await Utils.randInt(0, 31)
+    list.selectedIndex = Math.floor(Math.random() * 32)
   })
 }
 
