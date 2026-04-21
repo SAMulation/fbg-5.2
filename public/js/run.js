@@ -10,6 +10,7 @@ import { CHANGE, TB, PEN_DOWN, PEN_NO_DOWN, TIMEOUT, TWOMIN, SAFETY_KICK, KICKOF
 // All deterministic game math should flow through this — DOM/animation stays in run.js.
 import { MULTI, matchupQuality, resolveFieldGoal, resolveHailMary } from './engine.js'
 import { buildEngineState, replayRng } from './engineBridge.js'
+import { canResolveRegularViaEngine, resolveRegularViaEngine } from './engineRunner.js'
 import { alertBox, sleep, setBallSpot, setSpot, animationSimple, animationWaitForCompletion, animationWaitThenHide, animationPrePick, animationPostPick, resetBoardContainer, firstDownLine } from './graphics.js'
 
 export default class Run {
@@ -1866,6 +1867,22 @@ export default class Run {
   async doPlay (game, p1, p2) {
     if (game.status >= REG && game.status <= DEF_TP) {
       await this.regPlay(game, p1, p2)
+    }
+
+    // Engine-backed fast path: clean regular-vs-regular plays with no
+    // Same-Play / trick-play routing needed. The engine computes multiplier,
+    // draws yards, applies the formula, and returns a pre-baked outcome.
+    // v5.1's endPlay / calcDist picks up the values from game.thisPlay.
+    if (canResolveRegularViaEngine(game, p1, p2)) {
+      const outcome = resolveRegularViaEngine(game, p1, p2)
+      if (outcome) {
+        game.thisPlay.multiplierCard = outcome.multiplierCard
+        game.thisPlay.yardCard = outcome.yardCard
+        game.thisPlay.multiplier = outcome.multiplier
+        game.thisPlay.quality = outcome.quality
+        game.thisPlay.dist = outcome.dist
+        return
+      }
     }
 
     if (game.status === SAME) {
