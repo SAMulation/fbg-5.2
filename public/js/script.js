@@ -14,24 +14,24 @@ import { MODAL_MESSAGES } from './defaults.js'
 // import TOKEN from './config.js'
 const channel = null
 
-// Enable pusher logging - don't include this in production
-Pusher.logToConsole = true
-// console.log(TOKEN)
-const pusher = new Pusher('f18497dc97d155f3f978', {
-  userAuthentication: {
-    endpoint: '/.netlify/functions/main/pusher/user-auth'
-  },
-  channelAuthorization: { endpoint: '/.netlify/functions/main/pusher/auth' },
-  cluster: 'us3'
-})
-
-// Multiplayer (Pusher) is currently disabled. signin() requires server-side
-// PUSHER_SECRET; skipping keeps single-player boot clean on localhost and
-// Netlify previews without secrets.
+// Multiplayer (Pusher) is currently disabled. Skip the whole Pusher init
+// in that mode — the WebSocket transport would still spam 4009 auth errors
+// to the console even with signin() skipped. The `pusher` symbol below is
+// a no-op stub that satisfies the places run.js / game.js reference it.
 const MULTIPLAYER_ENABLED = false
-if (MULTIPLAYER_ENABLED) {
-  pusher.signin()
-}
+Pusher.logToConsole = MULTIPLAYER_ENABLED
+
+const pusher = MULTIPLAYER_ENABLED
+  ? (() => {
+      const p = new Pusher('f18497dc97d155f3f978', {
+        userAuthentication: { endpoint: '/.netlify/functions/main/pusher/user-auth' },
+        channelAuthorization: { endpoint: '/.netlify/functions/main/pusher/auth' },
+        cluster: 'us3'
+      })
+      p.signin()
+      return p
+    })()
+  : { subscribe: () => ({ bind: () => {}, trigger: () => {} }), disconnect: () => {} }
 
 // pusher.bind('pusher:signin_success', (data) => {
 //   channel = pusher.subscribe('private-channel')
