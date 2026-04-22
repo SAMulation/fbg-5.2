@@ -27,6 +27,7 @@ const { GameDriver } = await import('../../public/js/gameDriver.js')
 const { createLocalPusher } = await import('../../public/js/localSession.js')
 const { HarnessInput, randomStrategy } = await import('./harness-input.mjs')
 const { Narrator } = await import('./narrator.mjs')
+const { InvariantChecker } = await import('./invariants.mjs')
 
 const N = parseInt(process.env.N || '3', 10)
 const QTR = parseInt(process.env.QTR || '7', 10)
@@ -69,10 +70,13 @@ async function runOneGame (idx) {
   )
   game.animation = false
 
-  // Subscribe narrator BEFORE driver starts so we catch the first broadcast.
+  // Subscribe narrator + invariants BEFORE driver starts so we catch
+  // the first broadcast.
   const channel = pusher.subscribe()
   const narrator = new Narrator(channel)
   narrator.start()
+  const invariants = new InvariantChecker(channel)
+  invariants.start()
 
   const driver = new GameDriver(game.run, game)
 
@@ -91,6 +95,8 @@ async function runOneGame (idx) {
       ok: true,
       transcript: narrator.transcript(),
       stats: narrator.statsBlock(),
+      invariants: invariants.report(),
+      violationCount: invariants.violations.length,
       finalState: state
     }
   } catch (err) {
@@ -100,6 +106,8 @@ async function runOneGame (idx) {
       err: err.message || String(err),
       transcript: narrator.transcript(),
       stats: narrator.statsBlock(),
+      invariants: invariants.report(),
+      violationCount: invariants.violations.length,
       finalState: driver.state
     }
   }
@@ -118,7 +126,12 @@ async function main () {
     const r = await runOneGame(i)
     pieces.push(r.transcript)
     pieces.push('\n' + r.stats)
+    pieces.push('\n--- Invariants ---')
+    pieces.push(r.invariants)
     if (!r.ok) pieces.push(`\n!!! GAME FAILED: ${r.err}`)
+    if (r.violationCount > 0) {
+      pieces.push(`\n!!! ${r.violationCount} INVARIANT VIOLATION(S) IN GAME ${i + 1}`)
+    }
   }
 
   const output = pieces.join('\n')

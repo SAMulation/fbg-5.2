@@ -26,7 +26,11 @@ const { HarnessInput, randomStrategy, alwaysShortRunStrategy } = await import('.
 
 const MODE = process.env.MODE || 'single'
 const N = parseInt(process.env.N || '1', 10)
-const TIMEOUT = parseInt(process.env.TIMEOUT || '15000', 10)
+// With situational CPU AI active, games that hit overtime can legitimately
+// take longer (multiple OT periods if neither side scores). 60s absorbs
+// most of the tail; ~1-2% of games can still run past this. Flagged as
+// a potential bug — see memory: feedback_ot_timeout_tail.md.
+const TIMEOUT = parseInt(process.env.TIMEOUT || '60000', 10)
 const LOG = process.env.LOG || ''
 const STRATEGY = process.env.STRATEGY || 'random'
 const QTR = parseInt(process.env.QTR || '1', 10)
@@ -92,18 +96,21 @@ async function runOneGame (idx) {
   const connection = connectionFor(MODE, pusher)
   const input = new HarnessInput(strategy)
 
+  // Game constructor args: resume, connection, team1, team2, numberPlayers,
+  // gameType, home, qtrLength, animation (false → short alertBox sleeps),
+  // stats1, stats2, input.
   const game = new Game(
-    null,          // resume
+    null,
     connection,
-    TEAM1,         // team1 idx
-    TEAM2,         // team2 idx
+    TEAM1,
+    TEAM2,
     numberPlayersFor(MODE),
     'reg',
-    1,             // home = 1
-    QTR,           // qtrLength
-    false,         // animation — off so alertBox sleeps are short
-    null,          // stats1
-    null,          // stats2
+    1,
+    QTR,
+    false,
+    null,
+    null,
     input
   )
   // Quiet prepareHTML's real animations — with animation=false the

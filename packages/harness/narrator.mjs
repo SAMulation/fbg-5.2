@@ -100,7 +100,8 @@ export class Narrator {
       const time = snapState ? this.formatTime(snapState.clock) : '--:--'
       this.line('')
       this.line(
-        `  [${time}] ${teamId(snapOffense)} ${this.ordinal(snapDown)} & ${toGo === 0 ? 'Goal' : toGo} @ ${this.spotLabel(state, snapOffense, snapBallOn)}`
+        `  [${time} | ${this.scoreLabel(snapState)} | ${this.toLabel(snapState)}] ` +
+        `${teamId(snapOffense)} ${this.ordinal(snapDown)} & ${toGo === 0 ? 'Goal' : toGo} @ ${this.spotLabel(state, snapOffense, snapBallOn)}`
       )
     }
 
@@ -250,11 +251,9 @@ export class Narrator {
           break
 
         case 'QUARTER_ENDED': {
-          const s1 = state.players[1].score
-          const s2 = state.players[2].score
           this.line('')
           this.line(
-            `=== End of Q${ev.quarter} — ${state.players[1].team.id} ${s1}, ${state.players[2].team.id} ${s2} ===`
+            `=== End of Q${ev.quarter} | ${this.scoreLabel(state)} | ${this.toLabel(state)} ===`
           )
           this.currentQuarter = ev.quarter
           break
@@ -299,8 +298,9 @@ export class Narrator {
       const kicker = state.field.offense
       const receiver = kicker === 1 ? 2 : 1
       const reason = state.isSafetyKick ? ' (free kick after safety)' : ''
+      const time = this.formatTime(state.clock)
       this.line('')
-      this.line(`KICKOFF — ${teamId(kicker)} kicks to ${teamId(receiver)}${reason}`)
+      this.line(`[${time} | ${this.scoreLabel(state)} | ${this.toLabel(state)}] KICKOFF — ${teamId(kicker)} kicks to ${teamId(receiver)}${reason}`)
       this.stats.kickoffs++
     }
 
@@ -308,6 +308,18 @@ export class Narrator {
   }
 
   // --- helpers ---
+
+  scoreLabel (state) {
+    if (!state) return '0-0'
+    const id1 = state.players[1].team.id
+    const id2 = state.players[2].team.id
+    return `${id1} ${state.players[1].score}, ${id2} ${state.players[2].score}`
+  }
+
+  toLabel (state) {
+    if (!state) return '3-3'
+    return `TO: ${state.players[1].timeouts}-${state.players[2].timeouts}`
+  }
 
   spotLabel (state, offense, ballOn) {
     const defId = state.players[offense === 1 ? 2 : 1].team.id
