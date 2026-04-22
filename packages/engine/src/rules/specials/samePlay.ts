@@ -68,7 +68,19 @@ export function resolveSamePlay(state: GameState, rng: Rng): SpecialResolution {
         events,
       };
     }
-    // 0 yards, down consumed.
+    // 0 yards, down consumed. Emit PLAY_RESOLVED so the narrator can
+    // render "no gain" instead of leaving only SAME_PLAY_COIN visible
+    // and the down silently advancing (F-48).
+    events.push({
+      type: "PLAY_RESOLVED",
+      offensePlay: state.pendingPick.offensePlay ?? "SR",
+      defensePlay: state.pendingPick.defensePlay ?? "SR",
+      matchupQuality: 0,
+      multiplier: { card: "10", value: 0 },
+      yardsCard: 0,
+      yardsGained: 0,
+      newBallOn: stateAfterMult.field.ballOn,
+    });
     return applyYardageOutcome(stateAfterMult, 0, events);
   }
 
@@ -78,7 +90,17 @@ export function resolveSamePlay(state: GameState, rng: Rng): SpecialResolution {
   if (multDraw.card === "Jack") multiplier = heads ? 0 : -3;
 
   if (multiplier === 0) {
-    // 0 yards, down consumed.
+    // 0 yards, down consumed (F-48 — same as 10-tails branch above).
+    events.push({
+      type: "PLAY_RESOLVED",
+      offensePlay: state.pendingPick.offensePlay ?? "SR",
+      defensePlay: state.pendingPick.defensePlay ?? "SR",
+      matchupQuality: 0,
+      multiplier: { card: multDraw.card, value: 0 },
+      yardsCard: 0,
+      yardsGained: 0,
+      newBallOn: stateAfterMult.field.ballOn,
+    });
     return applyYardageOutcome(stateAfterMult, 0, events);
   }
 

@@ -176,6 +176,19 @@ FootBored-specific) so audit outputs can reference them.
   Game 2 saw two safeties, both from CHI calling TP/LP with ballOn < 15
   and taking 20+ yard losses into the endzone. AI should down-weight
   TP / LP when ballOn < 15.
+- **F-48 Narrator: SAME_PLAY_COIN with 0-yard outcome is invisible.**
+  Same-play paths that resolve to 0 yards (Jack+heads, 10+tails)
+  emit only SAME_PLAY_COIN, no PLAY_RESOLVED, so the transcript shows
+  "Same-play coin flip: tails" with the down silently advancing.
+  Either the engine should emit a PLAY_RESOLVED with yardsGained=0
+  on those paths, or the narrator should fall back to "no gain"
+  rendering when only the coin event is present.
+- **F-49 Driver bug: zero-second TD skips PAT.** When a TD is scored
+  on the zero-second play (clock=0), the driver dispatches
+  TICK_CLOCK(30) which fires QUARTER_ENDED → GAME_OVER before
+  _doPat can run. Fix: gameDriver._tickClock early-returns when
+  state.phase is PAT_CHOICE or TWO_PT_CONV. Observed Game 6 (audit
+  pass #1): CHI TD at Q4 0:00, score 0→6 (no PAT), game ended 7-6.
 
 ### Phase transitions (these match what `validate.ts` enforces)
 - **F-26** INIT → COIN_TOSS (via START_GAME)

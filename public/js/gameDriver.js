@@ -616,7 +616,12 @@ export class GameDriver {
     // In OT the engine's clock is frozen at 0; dispatching TICK_CLOCK
     // retriggers QUARTER_ENDED → startOvertime and spirals into an
     // infinite OT_START/OT_PLAY loop. Game-over also has no clock.
+    // F-49: don't tick when a PAT or 2-pt conversion is pending — at
+    // clock=0 (R-28 zero-second play), ticking would fire QUARTER_ENDED
+    // → GAME_OVER and skip the PAT entirely. Let the PAT/2pt resolve
+    // first, then the next regular play's tick will close the quarter.
     if (this.state.clock.quarter > 4 || this.state.phase === 'GAME_OVER') return
+    if (this.state.phase === 'PAT_CHOICE' || this.state.phase === 'TWO_PT_CONV') return
     fbgLog('driver', 'tickClock start host=' + this.host)
     if (this.host) {
       this.channel.dispatchAction({ type: 'TICK_CLOCK', seconds })
