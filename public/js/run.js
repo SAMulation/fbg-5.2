@@ -495,15 +495,46 @@ export default class Run {
       await this.cpuPlay(game, p)
       if (game.players[p].currentPlay) return game.players[p].currentPlay
 
-      let playAbrv = ''
-      let total = 0
-      while (total === 0) {
-        let playNum = Math.floor(Math.random() * 5)
-        if (playNum === 4) playNum = Math.floor(Math.random() * 5) // trick is rarer
-        playAbrv = 'SRLRSPLPTP'.substring(2 * playNum, 2 * playNum + 2)
-        total = game.players[p].plays[playAbrv].count
+      // R-19 — Defense-side clock management: in the final 2 minutes of
+      // Q2 or Q4, if we're trailing and have timeouts left, call one to
+      // stop the clock. Once per play max (keyed on currentTime to
+      // avoid re-calling on the driver's re-prompt after TO dispatch).
+      const onDefense = game.defNum === p
+      const trailing = game.players[game.opp(p)].score > game.players[p].score
+      const lateHalf = (game.qtr === 2 || game.qtr === 4) && game.currentTime <= 2.0
+      const hasTimeouts = game.players[p].timeouts > 0
+      const alreadyThisPlay = game.players[p]._toCalledAtClock === game.currentTime
+      if (onDefense && trailing && lateHalf && hasTimeouts && !alreadyThisPlay) {
+        game.players[p]._toCalledAtClock = game.currentTime
+        return 'TO'
       }
-      return playAbrv
+
+      // Weighted draw at the physical-game deck distribution — SR/LR/SP/LP
+      // 3 each, TP 1 per shuffle (F-40). TP naturally lands at 1/13 odds
+      // (7.7%) instead of the ~30-40% the old retry-on-TP produced.
+      //
+      // Using a fixed TARGET_WEIGHTS table (not the live hand counts)
+      // because the engine only decrements the OFFENSE's hand on each
+      // play — defense's TP count never drops, so a pure-hand-weighted
+      // draw still over-picks TP on defense. TARGET_WEIGHTS is gated by
+      // availability: if the offense hand shows 0 for a play, weight=0
+      // so we don't pick an exhausted card.
+      const plays = game.players[p].plays
+      const pool = ['SR', 'LR', 'SP', 'LP', 'TP']
+      const TARGET_WEIGHTS = { SR: 3, LR: 3, SP: 3, LP: 3, TP: 1 }
+      const weights = pool.map((a) => ((plays[a]?.count ?? 0) > 0 ? TARGET_WEIGHTS[a] : 0))
+      const totalWeight = weights.reduce((s, w) => s + w, 0)
+      if (totalWeight === 0) {
+        // Hand empty (shouldn't happen — refill triggers at 0); fall
+        // back to SR rather than stalling the driver.
+        return 'SR'
+      }
+      let pick = Math.random() * totalWeight
+      for (let i = 0; i < pool.length; i++) {
+        pick -= weights[i]
+        if (pick < 0) return pool[i]
+      }
+      return pool[pool.length - 1]
     }
 
     if (state === 'pat') {

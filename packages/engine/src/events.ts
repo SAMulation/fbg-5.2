@@ -45,6 +45,13 @@ export type Event =
   | { type: "PUNT"; player: PlayerId; landingSpot: number }
   | { type: "TIMEOUT_CALLED"; player: PlayerId; remaining: number }
   | { type: "TWO_MINUTE_WARNING" }
+  /**
+   * FootBored's zero-second play (R-28). Fired when the clock first hits
+   * 0:00 in a quarter. QUARTER_ENDED is deferred until the next tick >0
+   * so a final play can run at 0:00, with a last-chance TO prompt for
+   * a trailing team before that play.
+   */
+  | { type: "LAST_CHANCE_TO_OFFERED"; quarter: number }
   | { type: "QUARTER_ENDED"; quarter: number }
   | { type: "HALF_ENDED" }
   | { type: "OVERTIME_STARTED"; period: number; possession: PlayerId }

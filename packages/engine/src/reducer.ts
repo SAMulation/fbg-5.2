@@ -365,7 +365,23 @@ function reduceCore(state: GameState, action: Action, rng: Rng): ReduceResult {
         events.push({ type: "TWO_MINUTE_WARNING" });
       }
 
-      if (next === 0) {
+      // R-28 Zero-second play: when the clock first hits 0 (prev > 0,
+      // next === 0), emit LAST_CHANCE_TO_OFFERED and hold the quarter
+      // open. A final play runs at 0:00; the quarter actually ends on
+      // the NEXT non-zero tick (prev === 0 && action.seconds > 0).
+      // A TO called during the 0:00 play dispatches TICK_CLOCK(0) from
+      // the driver, which leaves the clock at 0 without transitioning.
+      if (prev > 0 && next === 0) {
+        events.push({ type: "LAST_CHANCE_TO_OFFERED", quarter: state.clock.quarter });
+        return {
+          state: { ...state, clock: { ...state.clock, secondsRemaining: 0 } },
+          events,
+        };
+      }
+
+      // Clock was already at 0 and a non-zero tick was dispatched → the
+      // final-play window is closed, quarter actually ends now.
+      if (prev === 0 && action.seconds > 0) {
         events.push({ type: "QUARTER_ENDED", quarter: state.clock.quarter });
         // Q1→Q2 and Q3→Q4: roll over clock, same half, same possession continues.
         if (state.clock.quarter === 1 || state.clock.quarter === 3) {

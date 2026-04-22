@@ -183,11 +183,41 @@ describe("TICK_CLOCK", () => {
     expect(r.events.some((e) => e.type === "TWO_MINUTE_WARNING")).toBe(false);
   });
 
-  it("Q1 → Q2 rollover keeps possession and resets clock", () => {
+  // R-28: quarter transitions now require TWO ticks — the first takes
+  // the clock to 0 (emits LAST_CHANCE_TO_OFFERED), the next non-zero
+  // tick closes the quarter. Models FootBored's "zero-second play."
+
+  it("clock hits 0 → LAST_CHANCE_TO_OFFERED, quarter does NOT end yet", () => {
     const s: GameState = {
       ...fresh(),
       phase: "REG_PLAY",
-      clock: { quarter: 1, secondsRemaining: 10, quarterLengthMinutes: 7 },
+      clock: { quarter: 1, secondsRemaining: 30, quarterLengthMinutes: 7 },
+      field: { ballOn: 50, firstDownAt: 60, down: 1, offense: 1 },
+    };
+    const r = reduce(s, { type: "TICK_CLOCK", seconds: 30 }, seededRng(1));
+    expect(r.state.clock.secondsRemaining).toBe(0);
+    expect(r.state.clock.quarter).toBe(1); // still Q1
+    expect(r.events.some((e) => e.type === "LAST_CHANCE_TO_OFFERED")).toBe(true);
+    expect(r.events.some((e) => e.type === "QUARTER_ENDED")).toBe(false);
+  });
+
+  it("TICK_CLOCK(0) at clock 0 is a no-op — models TO during zero-second play", () => {
+    const s: GameState = {
+      ...fresh(),
+      phase: "REG_PLAY",
+      clock: { quarter: 1, secondsRemaining: 0, quarterLengthMinutes: 7 },
+    };
+    const r = reduce(s, { type: "TICK_CLOCK", seconds: 0 }, seededRng(1));
+    expect(r.state.clock.secondsRemaining).toBe(0);
+    expect(r.state.clock.quarter).toBe(1);
+    expect(r.events.some((e) => e.type === "QUARTER_ENDED")).toBe(false);
+  });
+
+  it("Q1 → Q2 rollover on the SECOND non-zero tick (after zero-second play)", () => {
+    const s: GameState = {
+      ...fresh(),
+      phase: "REG_PLAY",
+      clock: { quarter: 1, secondsRemaining: 0, quarterLengthMinutes: 7 },
       field: { ballOn: 50, firstDownAt: 60, down: 1, offense: 1 },
     };
     const r = reduce(s, { type: "TICK_CLOCK", seconds: 30 }, seededRng(1));
@@ -197,12 +227,12 @@ describe("TICK_CLOCK", () => {
     expect(r.events.some((e) => e.type === "QUARTER_ENDED")).toBe(true);
   });
 
-  it("end of Q2 → halftime, flips receiver, refreshes timeouts", () => {
+  it("end of Q2 → halftime on the second tick", () => {
     const s: GameState = {
       ...fresh(),
       phase: "REG_PLAY",
       openingReceiver: 1,
-      clock: { quarter: 2, secondsRemaining: 5, quarterLengthMinutes: 7 },
+      clock: { quarter: 2, secondsRemaining: 0, quarterLengthMinutes: 7 },
       players: {
         1: { ...fresh().players[1], timeouts: 0 },
         2: { ...fresh().players[2], timeouts: 1 },
@@ -218,11 +248,11 @@ describe("TICK_CLOCK", () => {
     expect(r.state.phase).toBe("KICKOFF");
   });
 
-  it("end of Q4 with score diff → GAME_OVER with winner", () => {
+  it("end of Q4 with score diff → GAME_OVER (second tick)", () => {
     const s: GameState = {
       ...fresh(),
       phase: "REG_PLAY",
-      clock: { quarter: 4, secondsRemaining: 5, quarterLengthMinutes: 7 },
+      clock: { quarter: 4, secondsRemaining: 0, quarterLengthMinutes: 7 },
       players: {
         1: { ...fresh().players[1], score: 14 },
         2: { ...fresh().players[2], score: 7 },
@@ -234,11 +264,11 @@ describe("TICK_CLOCK", () => {
     expect(gameOver?.type === "GAME_OVER" && gameOver.winner).toBe(1);
   });
 
-  it("end of Q4 tied → overtime", () => {
+  it("end of Q4 tied → overtime (second tick)", () => {
     const s: GameState = {
       ...fresh(),
       phase: "REG_PLAY",
-      clock: { quarter: 4, secondsRemaining: 5, quarterLengthMinutes: 7 },
+      clock: { quarter: 4, secondsRemaining: 0, quarterLengthMinutes: 7 },
       players: {
         1: { ...fresh().players[1], score: 14 },
         2: { ...fresh().players[2], score: 14 },

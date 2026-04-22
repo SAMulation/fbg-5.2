@@ -250,6 +250,10 @@ export class Narrator {
           this.line('    [Two-minute warning]')
           break
 
+        case 'LAST_CHANCE_TO_OFFERED':
+          this.line(`    [Last-chance timeout — final play of Q${ev.quarter}]`)
+          break
+
         case 'QUARTER_ENDED': {
           this.line('')
           this.line(

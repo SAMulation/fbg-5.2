@@ -220,10 +220,15 @@ function decrementHand(
 
   hand[play] = Math.max(0, hand[play] - 1);
 
-  const regularExhausted =
-    hand.SR === 0 && hand.LR === 0 && hand.SP === 0 && hand.LP === 0 && hand.TP === 0;
+  // v5.1 12-card reshuffle: when the 12 regular-play cards (SR/LR/SP/LP,
+  // 3 each) are all exhausted, refill them. TP is tracked separately
+  // with 1 card per shuffle; it refills on the same trigger to avoid
+  // an orphaned-TP state (hand=[0,0,0,0,1]) where the CPU is forced
+  // to pick TP every play.
+  const regularsExhausted =
+    hand.SR === 0 && hand.LR === 0 && hand.SP === 0 && hand.LP === 0;
 
-  if (regularExhausted) {
+  if (regularsExhausted) {
     return {
       ...player,
       hand: { SR: 3, LR: 3, SP: 3, LP: 3, TP: 1, HM: hand.HM },

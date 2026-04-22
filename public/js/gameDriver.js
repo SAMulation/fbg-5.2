@@ -363,6 +363,10 @@ export class GameDriver {
   }
 
   async _doPlay () {
+    // R-19: reset per-play timeout counter before either play path.
+    // Any CALL_TIMEOUT dispatched from _promptPlayWithTimeouts
+    // increments it; _tickClock at end reads it and ticks 0 if > 0.
+    this._timeoutsThisPlay = 0
     if (this.isLocal) return this._doPlayLocal()
     return this._doPlayOnline()
   }
@@ -421,7 +425,7 @@ export class GameDriver {
     fbgLog('driver', 'drain done, animating')
     await this._animateAndScore(resolved.events, resolved.state)
     fbgLog('driver', 'animate done, ticking')
-    await this._tickClock(30)
+    await this._tickClock(this._timeoutsThisPlay > 0 ? 0 : 30)
     fbgLog('driver', 'tick done')
   }
 
@@ -448,7 +452,7 @@ export class GameDriver {
       })
       const allEvents = await this._drainUntilResolved()
       await this._animateAndScore(allEvents, this.state)
-      await this._tickClock(30)
+      await this._tickClock(this._timeoutsThisPlay > 0 ? 0 : 30)
       return
     }
 
@@ -472,7 +476,7 @@ export class GameDriver {
     const allEvents = [...preEvents, ...rest]
 
     await this._animateAndScore(allEvents, this.state)
-    await this._tickClock(30)
+    await this._tickClock(this._timeoutsThisPlay > 0 ? 0 : 30)
   }
 
   /**
@@ -493,6 +497,8 @@ export class GameDriver {
         continue
       }
       fbgLog('driver', 'timeout called by p=' + p)
+      // R-19: TO stops the clock for this play (TICK_CLOCK(0) at end).
+      this._timeoutsThisPlay = (this._timeoutsThisPlay || 0) + 1
       this.channel.dispatchAction({ type: 'CALL_TIMEOUT', player: p })
       if (this.isLocal) {
         // Local mode: the broadcast queues up in stateQueue and would
@@ -619,6 +625,9 @@ export class GameDriver {
     fbgLog('driver', 'tickClock got: ' + events.map(e => e.type).join(','))
     this._applyStateToGame(state)
 
+    if (events.some(e => e.type === 'LAST_CHANCE_TO_OFFERED')) {
+      await alertBox(this.run, 'Last chance — final play at 0:00.')
+    }
     if (events.some(e => e.type === 'TWO_MINUTE_WARNING')) {
       await alertBox(this.run, 'Two-minute warning.')
     }
