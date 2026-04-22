@@ -9,7 +9,8 @@
     "build": "tsc",
     "build:browser": "esbuild src/index.ts --bundle --format=esm --outfile=../../public/js/engine.js --sourcemap=inline",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "posttest": "npm run build:browser"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

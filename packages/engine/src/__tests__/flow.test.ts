@@ -35,14 +35,18 @@ describe("COIN_TOSS_CALL", () => {
   const heads: Rng = { d6: () => 1, coinFlip: () => "heads", intBetween: () => 0 };
   const tails: Rng = { ...heads, coinFlip: () => "tails" };
 
+  // validateAction requires phase=COIN_TOSS for COIN_TOSS_CALL, so step
+  // the state through START_GAME first.
+  const afterStart = (): GameState => ({ ...fresh(), phase: "COIN_TOSS" });
+
   it("caller wins if call matches flip", () => {
-    const r = reduce(fresh(), { type: "COIN_TOSS_CALL", player: 1, call: "heads" }, heads);
+    const r = reduce(afterStart(), { type: "COIN_TOSS_CALL", player: 1, call: "heads" }, heads);
     const ev = r.events.find((e) => e.type === "COIN_TOSS_RESULT");
     expect(ev?.type === "COIN_TOSS_RESULT" && ev.winner).toBe(1);
   });
 
   it("caller loses if call mismatches flip", () => {
-    const r = reduce(fresh(), { type: "COIN_TOSS_CALL", player: 1, call: "heads" }, tails);
+    const r = reduce(afterStart(), { type: "COIN_TOSS_CALL", player: 1, call: "heads" }, tails);
     const ev = r.events.find((e) => e.type === "COIN_TOSS_RESULT");
     expect(ev?.type === "COIN_TOSS_RESULT" && ev.winner).toBe(2);
   });
@@ -110,7 +114,8 @@ describe("FOURTH_DOWN_CHOICE", () => {
   const s: GameState = {
     ...fresh(),
     phase: "REG_PLAY",
-    field: { ballOn: 40, firstDownAt: 50, down: 4, offense: 1 },
+    // ballOn 45 so FG is in range (validator rejects FG from <45)
+    field: { ballOn: 45, firstDownAt: 55, down: 4, offense: 1 },
   };
 
   it("go → no-op, next PICK_PLAY continues the down", () => {

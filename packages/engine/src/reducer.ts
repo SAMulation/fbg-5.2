@@ -18,6 +18,7 @@
 import type { Action } from "./actions.js";
 import type { Event } from "./events.js";
 import type { GameState, KickType, ReturnType } from "./types.js";
+import { validateAction } from "./validate.js";
 import type { Rng } from "./rng.js";
 import { isRegularPlay, resolveRegularPlay } from "./rules/play.js";
 import {
@@ -44,6 +45,14 @@ export interface ReduceResult {
 }
 
 export function reduce(state: GameState, action: Action, rng: Rng): ReduceResult {
+  // Gate at the top: invalid actions are silently no-oped. Same contract
+  // as the reducer's per-case shape checks ("Illegal picks are silently
+  // no-op'd; the orchestrator is responsible for surfacing errors"), but
+  // centralized so an unauthenticated DO client can't send a malformed
+  // payload that slips past a missing case-level check.
+  if (validateAction(state, action) !== null) {
+    return { state, events: [] };
+  }
   const result = reduceCore(state, action, rng);
   return applyOvertimeRouting(state, result);
 }
