@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { reduce } from "../reducer.js";
 import { resolveTwoPointConversion } from "../rules/specials/twoPoint.js";
 import { initialState } from "../state.js";
+import { seededRng } from "../rng.js";
 import type { GameState } from "../types.js";
 import type { Rng } from "../rng.js";
 
@@ -52,5 +54,53 @@ describe("Two-Point Conversion", () => {
     expect(r.events.some((e) => e.type === "TWO_POINT_FAILED")).toBe(true);
     expect(r.state.players[1].score).toBe(0);
     expect(r.state.phase).toBe("KICKOFF");
+  });
+});
+
+describe("Two-Point Conversion — PICK_PLAY routing (regression)", () => {
+  it("offense picks TP during TWO_PT_CONV → coerced to SR, resolves as 2-pt, no phantom TOUCHDOWN", () => {
+    // Prior bug: TP on 2-pt fell through to resolveOffensiveTrickPlay, which
+    // could emit TOUCHDOWN + transition to PAT_CHOICE for a 6-pt mis-score.
+    const base = s();
+    // Offense picks TP first, defense picks SR second.
+    const r1 = reduce(base, { type: "PICK_PLAY", player: 1, play: "TP" }, seededRng(1));
+    const r2 = reduce(r1.state, { type: "PICK_PLAY", player: 2, play: "SR" }, seededRng(2));
+
+    // Must end in KICKOFF (2-pt terminal), never PAT_CHOICE.
+    expect(r2.state.phase).toBe("KICKOFF");
+    // Must emit a TWO_POINT_* event, never TOUCHDOWN.
+    const types = r2.events.map((e) => e.type);
+    expect(types).not.toContain("TOUCHDOWN");
+    expect(
+      types.includes("TWO_POINT_GOOD") || types.includes("TWO_POINT_FAILED"),
+    ).toBe(true);
+    // Score must be 0 or 2 — never 6 or 7.
+    expect([0, 2]).toContain(r2.state.players[1].score);
+  });
+
+  it("offense picks HM during TWO_PT_CONV → coerced, resolves as 2-pt", () => {
+    const base = s();
+    const r1 = reduce(base, { type: "PICK_PLAY", player: 1, play: "HM" }, seededRng(3));
+    const r2 = reduce(r1.state, { type: "PICK_PLAY", player: 2, play: "SR" }, seededRng(4));
+
+    expect(r2.state.phase).toBe("KICKOFF");
+    const types = r2.events.map((e) => e.type);
+    expect(types).not.toContain("TOUCHDOWN");
+    expect(
+      types.includes("TWO_POINT_GOOD") || types.includes("TWO_POINT_FAILED"),
+    ).toBe(true);
+  });
+
+  it("defense picks TP during TWO_PT_CONV → coerced to SR, resolves as 2-pt", () => {
+    const base = s();
+    const r1 = reduce(base, { type: "PICK_PLAY", player: 1, play: "LR" }, seededRng(5));
+    const r2 = reduce(r1.state, { type: "PICK_PLAY", player: 2, play: "TP" }, seededRng(6));
+
+    expect(r2.state.phase).toBe("KICKOFF");
+    const types = r2.events.map((e) => e.type);
+    expect(types).not.toContain("TOUCHDOWN");
+    expect(
+      types.includes("TWO_POINT_GOOD") || types.includes("TWO_POINT_FAILED"),
+    ).toBe(true);
   });
 });

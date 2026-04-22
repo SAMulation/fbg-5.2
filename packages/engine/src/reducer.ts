@@ -171,25 +171,33 @@ function reduceCore(state: GameState, action: Action, rng: Rng): ReduceResult {
 
       // Both teams have picked — resolve.
       if (pendingPick.offensePlay && pendingPick.defensePlay) {
-        const stateWithPick: GameState = { ...state, pendingPick };
-
-        // 2-point conversion: PICK_PLAY in TWO_PT_CONV phase routes to a
-        // dedicated resolver (different scoring + transition than regular
-        // play). Restricted to regular plays — engine intentionally
-        // doesn't allow HM/TP exotic flows on the conversion.
-        if (
-          state.phase === "TWO_PT_CONV" &&
-          isRegularPlay(pendingPick.offensePlay) &&
-          isRegularPlay(pendingPick.defensePlay)
-        ) {
+        // 2-point conversion: PICK_PLAY in TWO_PT_CONV phase routes to the
+        // dedicated 2-pt resolver (scoring capped at 2 pts, no PAT cycle).
+        // TP/HM on a 2-pt try are coerced to SR so they can't mis-score:
+        // otherwise a TP that defaults to LR and crosses the goal line would
+        // run through applyYardageOutcome and emit TOUCHDOWN + transition to
+        // PAT_CHOICE, granting 6 points and a full PAT instead of 2.
+        if (state.phase === "TWO_PT_CONV") {
+          const offPlay = isRegularPlay(pendingPick.offensePlay)
+            ? pendingPick.offensePlay
+            : "SR";
+          const defPlay = isRegularPlay(pendingPick.defensePlay)
+            ? pendingPick.defensePlay
+            : "SR";
+          const stateWithPick: GameState = {
+            ...state,
+            pendingPick: { offensePlay: offPlay, defensePlay: defPlay },
+          };
           const tp = resolveTwoPointConversion(
             stateWithPick,
-            pendingPick.offensePlay,
-            pendingPick.defensePlay,
+            offPlay,
+            defPlay,
             rng,
           );
           return { state: tp.state, events: [...events, ...tp.events] };
         }
+
+        const stateWithPick: GameState = { ...state, pendingPick };
 
         // Hail Mary by offense — resolves immediately, defense pick ignored.
         if (pendingPick.offensePlay === "HM") {
