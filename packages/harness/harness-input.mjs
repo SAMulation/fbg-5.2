@@ -17,6 +17,14 @@ export class HarnessInput {
   }
 
   async getInput (game, p, type, msg = null) {
+    // For computer-controlled players, delegate to the real app CPU AI
+    // (run.js cpuPlay + cpuPages). This exercises the same situational
+    // logic the browser uses, so harness games reflect actual CPU behavior
+    // — punts on 4th-and-long, FG attempts in range, end-of-half clock
+    // management, kickoff picks per score/time situation, etc.
+    if (game.isComputer && game.isComputer(p)) {
+      return game.run.cpuPages(game, p, type, msg)
+    }
     const choice = await this.strategy.pick(game, p, type, msg)
     if (choice === undefined || choice === null) {
       throw new Error(`strategy returned empty pick for p=${p} type=${type}`)

@@ -30,15 +30,17 @@ const { Narrator } = await import('./narrator.mjs')
 
 const N = parseInt(process.env.N || '3', 10)
 const QTR = parseInt(process.env.QTR || '7', 10)
-const TIMEOUT = parseInt(process.env.TIMEOUT || '60000', 10)
+// CPU AI games are ~4x slower than pure random (alertBox paths + more
+// broadcasts per kickoff with picks). 7-min quarters can take 3-5 minutes.
+const TIMEOUT = parseInt(process.env.TIMEOUT || '300000', 10)
 const OUT = process.env.OUT || ''
 
 // Rotating matchups so the transcript covers different team ids.
 // Indices into public/js/teams.js TEAMS list.
 const MATCHUPS = [
-  [0, 1],   // SF vs CHI
+  [0, 1], // SF vs CHI
   [14, 15], // GB vs DAL? (indices depend on ordering — just visual variety)
-  [8, 11]   // LAC vs COL?
+  [8, 11] // LAC vs COL?
 ]
 
 function connectionFor (pusher) {
@@ -74,7 +76,7 @@ async function runOneGame (idx) {
 
   const driver = new GameDriver(game.run, game)
 
-  const timeout = new Promise((_, reject) => {
+  const timeout = new Promise((resolve, reject) => {
     realSetTimeout(
       () => reject(new Error('timed out after ' + TIMEOUT + 'ms')),
       TIMEOUT
@@ -105,20 +107,14 @@ async function runOneGame (idx) {
 
 async function main () {
   const pieces = []
-  pieces.push(
-    `=========================================================`
-  )
-  pieces.push(
-    `FBG narrative harness — N=${N} quarters=${QTR}min CPU vs CPU`
-  )
-  pieces.push(
-    `=========================================================\n`
-  )
+  pieces.push('=========================================================')
+  pieces.push(`FBG narrative harness — N=${N} quarters=${QTR}min CPU vs CPU`)
+  pieces.push('=========================================================\n')
 
   for (let i = 0; i < N; i++) {
-    pieces.push(`\n╔════════════════════════════════════════╗`)
+    pieces.push('\n╔════════════════════════════════════════╗')
     pieces.push(`║  GAME ${i + 1}                                 ║`)
-    pieces.push(`╚════════════════════════════════════════╝\n`)
+    pieces.push('╚════════════════════════════════════════╝\n')
     const r = await runOneGame(i)
     pieces.push(r.transcript)
     pieces.push('\n' + r.stats)

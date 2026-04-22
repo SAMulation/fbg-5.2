@@ -244,11 +244,129 @@ export default class Run {
   }
 
   // -------------------- CPU strategy --------------------
+  //
+  // Situational play-picker (4th-down decisions, end-of-half FG attempts,
+  // Hail Marys) — ported from v5.1's Run.cpuPlay. Writes into
+  // `game.players[p].currentPlay` so that cpuPages returns it directly on
+  // the next 'reg' pick instead of rolling a random play.
+  //
+  // v5.1 constants: TIMEOUT=4 (changeTime flag), REG=11 (score-diff upper
+  // bound for "down a possession + FG"). Hoisted as local consts to keep
+  // the port self-contained.
+
+  async cpuPlay (game, p) {
+    // Only the offense makes these decisions.
+    if (game.offNum !== p) return
+
+    const TIMEOUT_FLAG = 4
+    const REG_DIFF = 11
+
+    const qtr = game.qtr
+    const curtim = game.currentTime
+    const toCount = game.players[p].timeouts
+    const tchg = game.changeTime
+    const qlen = game.qtrLength
+    const spt = game.spot
+    const hm = game.players[p].hm
+    const dwn = game.down
+    const fdn = game.firstDown
+    const diff = game.players[game.opp(p)].score - game.players[p].score
+    let scoreBlock = 0
+    let timeBlock = 0
+    let dec = null
+
+    // Time block — what horizon are we playing on?
+    if (curtim === 0 && (qtr === 2 || qtr === 4) && toCount === 0 && tchg !== TIMEOUT_FLAG) {
+      timeBlock = 1 // Last play of half/game
+    } else if (curtim <= 0.5 && qtr === 4) {
+      timeBlock = 2 // Very late
+    } else if ((qlen <= 2 && qtr >= 3 && qtr <= 4) || (curtim <= 4 && qtr === 4)) {
+      timeBlock = 3 // Some time left
+    } else if ((qlen <= 4 && qtr >= 3 && qtr <= 4) || (curtim <= 8 && qtr === 4)) {
+      timeBlock = 4 // Plenty of time
+    }
+
+    // Score block — how far behind is the offense?
+    if (diff >= 1) {
+      if (diff <= 3) scoreBlock = 1 // Down a FG
+      else if (diff <= 8) scoreBlock = 2 // Down a possession
+      else if (diff <= REG_DIFF) scoreBlock = 3 // Down a poss + FG
+      else scoreBlock = 4 // Down 2+ TDs
+    }
+
+    // Half over, kick a FG if in range
+    if (spt >= 60 && ((timeBlock === 1 && qtr === 2) || (scoreBlock === 0 && timeBlock === 1 && qtr === 4))) {
+      dec = 'FG'
+    }
+
+    // Hail Mary from distance
+    if (!dec && hm && (
+      (timeBlock === 1 && scoreBlock > 1) ||
+      (timeBlock === 2 && scoreBlock === 1 && spt < 70) ||
+      (timeBlock === 2 && scoreBlock > 1)
+    )) {
+      dec = 'HM'
+    }
+
+    // Final possession and down a FG
+    if (!dec && timeBlock === 1 && scoreBlock === 1) {
+      if (spt >= 60) dec = 'FG'
+      else if (hm) dec = 'HM'
+    }
+
+    // OT go-for-it (no punts in OT)
+    if (!dec && qtr > 4 && scoreBlock === 2 && dwn === 4) {
+      if (hm && fdn - spt > 10) dec = 'HM'
+      else dec = 'GO'
+    }
+
+    // 4th down, dire situation
+    if (!dec && dwn === 4 && (
+      (timeBlock >= 1 && timeBlock <= 2 && scoreBlock === 1) ||
+      (timeBlock >= 3 && scoreBlock === 3)
+    )) {
+      if (spt >= 60) dec = 'FG'
+      else if (hm && fdn - spt > 10) dec = 'HM'
+      else dec = 'GO'
+    }
+
+    // 4th down, generally go for it
+    if (!dec && dwn === 4 && (
+      (timeBlock === 3 && scoreBlock >= 1 && scoreBlock <= 4) ||
+      (timeBlock === 4 && scoreBlock === 4)
+    )) {
+      if (hm && fdn - spt > 10) dec = 'HM'
+      else dec = 'GO'
+    }
+
+    // 4th down, default behavior: sneak if short + in sneak range,
+    // otherwise FG if in range, otherwise PUNT.
+    if (!dec && dwn === 4) {
+      if ((spt >= 98 || (spt >= 50 && spt <= 70)) && fdn - spt <= 3 && Math.random() < 0.5) {
+        dec = 'GO'
+      }
+      if (!dec) {
+        if (spt >= 60) dec = 'FG'
+        else dec = 'PUNT' // engine's SpecialPlay id (frontend legacy button is 'PT')
+      }
+    }
+
+    // Commit the decision (don't pre-set for GO / 2pt-conv — let random fallback).
+    const inTwoPt = game.engineState?.phase === 'TWO_PT_CONV'
+    if (dec && dec !== 'GO' && !inTwoPt) {
+      game.players[p].currentPlay = dec
+    }
+  }
 
   async cpuPages (game, p, state = 'reg') {
-    if (game.players[p].currentPlay) return game.players[p].currentPlay
-
     if (state === 'reg') {
+      // Situational AI first — may pre-set currentPlay to FG/PUNT/HM.
+      // Only honored for 'reg': for kick / ret / pat / coin / kickDec*,
+      // stale currentPlay (e.g. "LP" from the previous scoring play, or
+      // "/" set by _doKickoff) would short-circuit with a nonsense value.
+      await this.cpuPlay(game, p)
+      if (game.players[p].currentPlay) return game.players[p].currentPlay
+
       let playAbrv = ''
       let total = 0
       while (total === 0) {
@@ -275,6 +393,42 @@ export default class Run {
       let decPick = Math.floor(Math.random() * 2) + 1
       if (game.qtr < 4) decPick = decPick === 1 ? 'K' : 'R'
       return decPick
+    }
+
+    // Kickoff kick-type selection: RK default, OK when behind late, SK to
+    // bleed clock when ahead.
+    if (state === 'kick') {
+      const qtr = game.qtr
+      const ctim = game.currentTime
+      const pScore = game.players[p].score
+      const oppScore = game.players[game.opp(p)].score
+      if (
+        (qtr === 4 && ctim <= 3 && pScore < oppScore) ||
+        (((qtr === 3 && ctim <= 7) || qtr === 4) && oppScore - pScore > 8)
+      ) {
+        return 'OK'
+      }
+      if ((qtr === 2 || qtr === 4) && ctim <= 1 && pScore > oppScore) {
+        return 'SK'
+      }
+      return 'RK'
+    }
+
+    // Kickoff return-type selection: RR by default; OR to counter a likely
+    // onside when late/behind; TB on a coin flip otherwise (mild variety).
+    if (state === 'ret') {
+      const qtr = game.qtr
+      const ctim = game.currentTime
+      const pScore = game.players[p].score
+      const oppScore = game.players[game.opp(p)].score
+      if (
+        (qtr === 4 && ctim <= 3 && oppScore < pScore) ||
+        (((qtr === 3 && ctim <= 7) || qtr === 4) && pScore - oppScore > 8)
+      ) {
+        return 'OR'
+      }
+      if (Math.random() < 0.5) return 'TB'
+      return 'RR'
     }
 
     return null
