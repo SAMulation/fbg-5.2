@@ -83,6 +83,9 @@ export class GameDriver {
       'private-game-' + (this.game.connection.gamecode || 'local')
     )
     this.run.channel = this.channel
+    if (typeof this.run.initGameLog === 'function') {
+      this.run.initGameLog(this.channel)
+    }
 
     if (!this.isLocal) {
       // Legacy relay inbox — harmless; nothing in the driver reads it.
@@ -320,10 +323,21 @@ export class GameDriver {
     this._applyStateToGame(state)
 
     const receivingTeamName = game.players[game.offNum].team.name
+    const kickChosen = events.find(e => e.type === 'KICK_TYPE_CHOSEN')
+    const retChosen = events.find(e => e.type === 'RETURN_TYPE_CHOSEN')
     const tb = events.find(e => e.type === 'TOUCHBACK')
     const onside = events.find(e => e.type === 'ONSIDE_KICK')
     const returnEv = events.find(e => e.type === 'KICKOFF_RETURN')
     const punt = events.find(e => e.type === 'PUNT')
+
+    const KICK_LABEL = { RK: 'Regular Kick', OK: 'Onside Kick', SK: 'Squib Kick' }
+    const RET_LABEL = { RR: 'Regular Return', OR: 'Onside counter', TB: 'Touchback' }
+    if (kickChosen) {
+      await alertBox(this.run, kickerName + ' — ' + (KICK_LABEL[kickChosen.choice] || kickChosen.choice))
+    }
+    if (retChosen) {
+      await alertBox(this.run, returnerName + ' — ' + (RET_LABEL[retChosen.choice] || retChosen.choice))
+    }
 
     if (tb) {
       await alertBox(this.run, 'Touchback — ' + receivingTeamName + ' at the 25.')
@@ -697,6 +711,21 @@ export class GameDriver {
     game.players[2].score = state.players[2].score
     game.players[1].timeouts = state.players[1].timeouts
     game.players[2].timeouts = state.players[2].timeouts
+    // Sync the v5.1 hand state from the engine's authoritative hand. The
+    // legacy `plays[abrv].count` and `hm` fields on game.players feed
+    // UI decisions (button disable, CPU play pool, FG legality) that
+    // would otherwise drift from the real deck.
+    for (const p of [1, 2]) {
+      const hand = state.players[p].hand
+      game.players[p].hm = hand.HM
+      if (game.players[p].plays) {
+        if (game.players[p].plays.SR) game.players[p].plays.SR.count = hand.SR
+        if (game.players[p].plays.LR) game.players[p].plays.LR.count = hand.LR
+        if (game.players[p].plays.SP) game.players[p].plays.SP.count = hand.SP
+        if (game.players[p].plays.LP) game.players[p].plays.LP.count = hand.LP
+        if (game.players[p].plays.TP) game.players[p].plays.TP.count = hand.TP
+      }
+    }
 
     // Best-effort team sync on rejoin (teams may not match host/remote order)
     if (state.players[1].team?.id && game.players[1].team?.abrv !== state.players[1].team.id) {

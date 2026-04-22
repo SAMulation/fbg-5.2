@@ -35,11 +35,10 @@ export const BUTTONS = {
       base: false,
       count: false
     },
-    PT: {
+    PUNT: {
       name: 'Punt',
       base: false,
       count: false
-
     }
   },
   kick: {

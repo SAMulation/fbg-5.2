@@ -10,6 +10,7 @@
  * Intentionally thin. Resist adding logic here.
  */
 
+/* global location, URLSearchParams */
 import { Queue } from './queue.js'
 import { GameDriver } from './gameDriver.js'
 import {
@@ -75,6 +76,133 @@ export default class Run {
     this.rematchBar = document.querySelector('.rematch-bar')
     this.rematchBtn = document.querySelector('.rematch-btn')
     this.newgameBtn = document.querySelector('.newgame-btn')
+  }
+
+  // -------------------- dev-mode game log --------------------
+  //
+  // When URL has ?log=game, a right-side pane subscribes to the channel's
+  // server-state broadcasts and prints a play-by-play. Uses the same
+  // event-stream approach as the harness narrator but inlined here so the
+  // browser bundle doesn't depend on the harness module.
+
+  initGameLog (channel) {
+    // Use location.search rather than new URL(location.href) — the harness
+    // DOM stub provides `search` but not `href`, and throwing a
+    // "Invalid URL" here would take the whole game down.
+    const params = new URLSearchParams(location.search || '')
+    if (params.get('log') !== 'game') return
+    const pane = document.querySelector('.game-log-pane')
+    const list = document.querySelector('.game-log-entries')
+    const close = document.querySelector('.game-log-close')
+    if (!pane || !list) return
+    pane.classList.remove('hidden')
+    close.addEventListener('click', () => pane.classList.add('hidden'))
+
+    let prev = null
+    const KICK_LABEL = {
+      RK: 'Regular',
+      OK: 'Onside',
+      SK: 'Squib'
+    }
+    const RET_LABEL = {
+      RR: 'Regular Return',
+      OR: 'Onside counter',
+      TB: 'Touchback'
+    }
+    const PLAY_LABEL = {
+      SR: 'Short Run',
+      LR: 'Long Run',
+      SP: 'Short Pass',
+      LP: 'Long Pass',
+      TP: 'Trick Play',
+      HM: 'Hail Mary',
+      FG: 'Field Goal',
+      PUNT: 'Punt'
+    }
+
+    const push = (text, cls = '') => {
+      const li = document.createElement('li')
+      li.textContent = text
+      if (cls) li.classList.add(cls)
+      list.appendChild(li)
+      list.scrollTop = list.scrollHeight
+    }
+
+    const teamId = (state, p) => state.players[p]?.team?.id ?? ('P' + p)
+
+    channel.bind('server-state', ({ state, events }) => {
+      for (const ev of events) {
+        switch (ev.type) {
+          case 'GAME_STARTED': push('--- Game starts ---', 'game-log-header-line'); break
+          case 'COIN_TOSS_RESULT':
+            push(`Coin: ${ev.result} — ${teamId(state, ev.winner)} wins toss`)
+            break
+          case 'KICK_TYPE_CHOSEN':
+            push(`  ${teamId(state, ev.player)} → ${KICK_LABEL[ev.choice] ?? ev.choice} Kick`)
+            break
+          case 'RETURN_TYPE_CHOSEN':
+            push(`  ${teamId(state, ev.player)} → ${RET_LABEL[ev.choice] ?? ev.choice}`)
+            break
+          case 'TOUCHBACK':
+            push(`  Touchback — ${teamId(state, ev.receivingPlayer)} at the 25`)
+            break
+          case 'ONSIDE_KICK':
+            push(ev.recovered
+              ? `  ONSIDE RECOVERED by ${teamId(state, ev.recoveringPlayer)}`
+              : `  Onside failed — ${teamId(state, ev.recoveringPlayer)} ball`)
+            break
+          case 'KICKOFF_RETURN':
+            push(`  ${teamId(state, ev.returnerPlayer)} returns ${ev.yards}y`)
+            break
+          case 'PLAY_RESOLVED': {
+            const off = PLAY_LABEL[ev.offensePlay] ?? ev.offensePlay
+            const def = PLAY_LABEL[ev.defensePlay] ?? ev.defensePlay
+            const sign = ev.yardsGained >= 0 ? '+' : ''
+            push(`  ${off} vs ${def}: ${sign}${ev.yardsGained}y (${ev.multiplier.card} ${ev.multiplier.value}× × ${ev.yardsCard})`)
+            break
+          }
+          case 'FIRST_DOWN': push('  → 1st down'); break
+          case 'TURNOVER': push(`  → Turnover (${ev.reason})`); break
+          case 'TURNOVER_ON_DOWNS': push('  → Turnover on downs'); break
+          case 'TOUCHDOWN':
+            push(`  *** TD — ${teamId(state, ev.scoringPlayer)} ***`, 'game-log-score')
+            break
+          case 'FIELD_GOAL_GOOD':
+            push(`  *** FG GOOD — ${teamId(state, ev.player)} ***`, 'game-log-score')
+            break
+          case 'FIELD_GOAL_MISSED': push(`  FG no good (${teamId(state, ev.player)})`); break
+          case 'PAT_GOOD': push(`  PAT +1 ${teamId(state, ev.player)}`, 'game-log-score'); break
+          case 'TWO_POINT_GOOD':
+            push(`  2-PT +2 ${teamId(state, ev.player)}`, 'game-log-score')
+            break
+          case 'TWO_POINT_FAILED': push(`  2-pt failed (${teamId(state, ev.player)})`); break
+          case 'SAFETY':
+            push(`  *** SAFETY +2 ${teamId(state, ev.scoringPlayer)} ***`, 'game-log-score')
+            break
+          case 'PUNT': push(`  Punt lands at ${ev.landingSpot}`); break
+          case 'TIMEOUT_CALLED':
+            push(`  [Timeout — ${teamId(state, ev.player)}, ${ev.remaining} left]`)
+            break
+          case 'QUARTER_ENDED':
+            push(`=== End Q${ev.quarter} — ${state.players[1].team.id} ${state.players[1].score}, ${state.players[2].team.id} ${state.players[2].score} ===`, 'game-log-header-line')
+            break
+          case 'HALF_ENDED': push('[halftime]', 'game-log-header-line'); break
+          case 'OVERTIME_STARTED':
+            push(`=== OT${ev.period} — ${teamId(state, ev.possession)} first ===`, 'game-log-header-line')
+            break
+          case 'GAME_OVER':
+            push(`=== GAME OVER — ${state.players[1].team.id} ${state.players[1].score}, ${state.players[2].team.id} ${state.players[2].score} ===`, 'game-log-header-line')
+            break
+        }
+      }
+      if (prev && prev.phase !== 'KICKOFF' && state.phase === 'KICKOFF') {
+        const kicker = state.field.offense
+        const receiver = kicker === 1 ? 2 : 1
+        const reason = state.isSafetyKick ? ' (free kick)' : ''
+        push(`KICKOFF — ${teamId(state, kicker)} kicks to ${teamId(state, receiver)}${reason}`, 'game-log-header-line')
+      }
+      prev = state
+    })
   }
 
   // -------------------- chat --------------------
@@ -347,7 +475,7 @@ export default class Run {
       }
       if (!dec) {
         if (spt >= 60) dec = 'FG'
-        else dec = 'PUNT' // engine's SpecialPlay id (frontend legacy button is 'PT')
+        else dec = 'PUNT'
       }
     }
 
@@ -439,20 +567,24 @@ export default class Run {
   playLegal (p, passedType, abrv, thisType) {
     if (passedType !== 'reg') return passedType === thisType
 
-    const playIndex = 'SR,LR,SP,LP,TP,HM,FG,PT'.indexOf(abrv) / 3
-    if (playIndex === -1) return false
+    const REGULAR = new Set(['SR', 'LR', 'SP', 'LP', 'TP'])
+    const DEFENSE_ONLY_BLOCKED = new Set(['HM', 'FG', 'PUNT'])
+    const SPECIALS = new Set(['FG', 'PUNT'])
+    if (!REGULAR.has(abrv) && abrv !== 'HM' && !SPECIALS.has(abrv)) return false
 
+    // Hand count
     let totalPlays = 0
-    if (abrv === 'FG' || abrv === 'PT') totalPlays = -1
+    if (SPECIALS.has(abrv)) totalPlays = -1
     else if (abrv === 'HM') totalPlays = this.game.players[p].hm
     else totalPlays = this.game.players[p].plays[abrv].count
 
-    if (playIndex >= 0 && playIndex <= 5 && totalPlays === 0) return false
-    if (playIndex >= 5 && playIndex <= 7 && this.game.defNum === p) return false
+    if (REGULAR.has(abrv) && totalPlays === 0) return false
+    if (abrv === 'HM' && totalPlays === 0) return false
+    if (DEFENSE_ONLY_BLOCKED.has(abrv) && this.game.defNum === p) return false
     if (abrv === 'FG' && this.game.spot < 45) return false
-    if (abrv === 'PT' && this.game.down !== 4) return false
-    if (abrv === 'PT' && this.game.isOT()) return false
-    if (totalPlays === -1 && this.game.twoPtConv) return false
+    if (abrv === 'PUNT' && this.game.down !== 4) return false
+    if (abrv === 'PUNT' && this.game.isOT()) return false
+    if (SPECIALS.has(abrv) && this.game.twoPtConv) return false
     return true
   }
 
