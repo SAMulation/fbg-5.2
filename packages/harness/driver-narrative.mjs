@@ -15,7 +15,7 @@
  *     that path) — rematch it if you want deterministic picks.
  */
 
-import { setupDomStub, installFastTimers, realSetTimeout } from './dom-stub.mjs'
+import { setupDomStub, installFastTimers, realSetTimeout, realClearTimeout } from './dom-stub.mjs'
 import { writeFileSync } from 'node:fs'
 
 setupDomStub()
@@ -80,8 +80,13 @@ async function runOneGame (idx) {
 
   const driver = new GameDriver(game.run, game)
 
+  // Capture the timer handle so we can clear it on success — otherwise
+  // the pending realSetTimeout keeps the Node event loop alive for the
+  // full TIMEOUT window even after the game finishes (~5min idle per game
+  // when batched, killing throughput).
+  let timeoutHandle = null
   const timeout = new Promise((resolve, reject) => {
-    realSetTimeout(
+    timeoutHandle = realSetTimeout(
       () => reject(new Error('timed out after ' + TIMEOUT + 'ms')),
       TIMEOUT
     )
@@ -89,6 +94,7 @@ async function runOneGame (idx) {
 
   try {
     await Promise.race([driver.run_(), timeout])
+    if (timeoutHandle) realClearTimeout(timeoutHandle)
     const state = driver.state
     return {
       idx,
@@ -100,6 +106,7 @@ async function runOneGame (idx) {
       finalState: state
     }
   } catch (err) {
+    if (timeoutHandle) realClearTimeout(timeoutHandle)
     return {
       idx,
       ok: false,
