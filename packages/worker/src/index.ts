@@ -17,6 +17,9 @@ export { GameRoom } from "./game-room.js";
 export interface Env {
   GAME_ROOM: DurableObjectNamespace;
   ASSETS: Fetcher;
+  RATE_LIMITER?: {
+    limit(opts: { key: string }): Promise<{ success: boolean }>;
+  };
 }
 
 function randomCode(): string {
@@ -47,6 +50,24 @@ export default {
 
     // Create a new game room: Worker picks a code, client opens WS to it.
     if (url.pathname === "/api/games" && request.method === "POST") {
+      // Rate limit per client IP so a single actor can't spray
+      // randomCode() calls to exhaust Durable Object storage. The binding
+      // is optional at the type level — in tests / local dev without the
+      // binding configured, we no-op and let the request through.
+      if (env.RATE_LIMITER) {
+        const ip = request.headers.get("cf-connecting-ip") ??
+          request.headers.get("x-forwarded-for") ??
+          "unknown";
+        const { success } = await env.RATE_LIMITER.limit({ key: `gamecreate:${ip}` });
+        if (!success) {
+          return withCors(
+            new Response("too many game creation attempts; slow down", {
+              status: 429,
+              headers: { "retry-after": "60" },
+            }),
+          );
+        }
+      }
       const code = randomCode();
       return withCors(Response.json({ code }));
     }

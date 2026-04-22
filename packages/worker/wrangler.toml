@@ -28,6 +28,16 @@ new_sqlite_classes = ["GameRoom"]
 directory = "../../public"
 binding = "ASSETS"
 
+# Cloudflare rate-limiter binding: throttles POST /api/games per client
+# IP to prevent a single actor from creating unbounded Durable Objects.
+# The default namespace_id=1001, limit=20 req / period=60s is a
+# speed-bump against casual abuse, not a replacement for auth.
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
 # Local dev defaults: wrangler dev serves on 8787 by default.
 [dev]
 port = 8787
