@@ -11,3 +11,4 @@ packages/engine/dist/
 
 # Wrangler local state
 packages/worker/.wrangler/
+.claude/
