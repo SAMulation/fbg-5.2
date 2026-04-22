@@ -77,6 +77,36 @@ describe("Trick Play (offense calling)", () => {
     expect(r.state.field.ballOn).toBe(97);
   });
 
+  it("R-25 die=2 penalty past first-down marker → auto 1st down", () => {
+    // 2nd & 3 @ own 39: ballOn=39, firstDownAt=42. Penalty +15 → 54.
+    // 54 past 42 → first down, down=1, firstDownAt=64.
+    const base = s(39);
+    const state2: GameState = {
+      ...base,
+      field: { ballOn: 39, firstDownAt: 42, down: 2, offense: 1 },
+    };
+    const r = resolveOffensiveTrickPlay(state2, rigRng({ d6: 2 }));
+    expect(r.state.field.ballOn).toBe(54);
+    expect(r.state.field.down).toBe(1);
+    expect(r.state.field.firstDownAt).toBe(64);
+    expect(r.events.some((e) => e.type === "FIRST_DOWN")).toBe(true);
+  });
+
+  it("R-25 die=2 penalty short of marker → down replays, no FIRST_DOWN", () => {
+    // 1st & 20 @ own 30: ballOn=30, firstDownAt=50. Penalty +15 → 45.
+    // 45 < 50 → down stays, firstDownAt stays.
+    const base = s(30);
+    const state2: GameState = {
+      ...base,
+      field: { ballOn: 30, firstDownAt: 50, down: 1, offense: 1 },
+    };
+    const r = resolveOffensiveTrickPlay(state2, rigRng({ d6: 2 }));
+    expect(r.state.field.ballOn).toBe(45);
+    expect(r.state.field.down).toBe(1);
+    expect(r.state.field.firstDownAt).toBe(50);
+    expect(r.events.some((e) => e.type === "FIRST_DOWN")).toBe(false);
+  });
+
   it("die=3 → fixed -3x multiplier, yards card draw", () => {
     const r = resolveOffensiveTrickPlay(s(50), rigRng({ d6: 3, yardsCard: 4 }));
     const resolved = r.events.find((e) => e.type === "PLAY_RESOLVED");

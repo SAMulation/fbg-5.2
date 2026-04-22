@@ -116,7 +116,11 @@ export class Narrator {
           break
 
         case 'KICKOFF':
-          // Banner is emitted on phase transition above — skip the event.
+          // Banner is emitted on phase transition above. Still show
+          // the kick detail when rolls are present (non-safety kickoffs).
+          if (ev.kickRoll != null && ev.kickYards != null) {
+            this.line(`  Kick: ${ev.kickYards}y (d6 ${ev.kickRoll})`)
+          }
           break
 
         case 'KICK_TYPE_CHOSEN':
@@ -133,14 +137,18 @@ export class Narrator {
           this.stats.touchbacks++
           break
 
-        case 'ONSIDE_KICK':
+        case 'ONSIDE_KICK': {
+          const rollLabel = (ev.roll != null && ev.odds != null)
+            ? ` [roll ${ev.roll}/${ev.odds}]`
+            : ''
           if (ev.recovered) {
-            this.line(`  → ONSIDE RECOVERED by ${teamId(ev.recoveringPlayer)}!`)
+            this.line(`  → ONSIDE RECOVERED by ${teamId(ev.recoveringPlayer)}!${rollLabel}`)
             this.stats.onsideRecovered++
           } else {
-            this.line(`  → Onside kick failed. ${teamId(ev.recoveringPlayer)} takes possession.`)
+            this.line(`  → Onside kick failed. ${teamId(ev.recoveringPlayer)} takes possession.${rollLabel}`)
           }
           break
+        }
 
         case 'KICKOFF_RETURN':
           this.line(`  → ${teamId(ev.returnerPlayer)} returns ${ev.yards} yards.`)
@@ -211,15 +219,25 @@ export class Narrator {
           break
         }
 
-        case 'FIELD_GOAL_GOOD':
-          this.line(`    *** FIELD GOAL GOOD — ${teamId(ev.player)} ***`)
+        case 'FIELD_GOAL_GOOD': {
+          showPlayHeader()
+          const detail = (ev.distance != null && ev.roll != null)
+            ? ` (${ev.distance}-yd, d6 ${ev.roll})`
+            : ''
+          this.line(`    *** FIELD GOAL GOOD — ${teamId(ev.player)}${detail} ***`)
           this.stats.fieldGoals++
           break
+        }
 
-        case 'FIELD_GOAL_MISSED':
-          this.line(`    Field goal NO GOOD (${teamId(ev.player)})`)
+        case 'FIELD_GOAL_MISSED': {
+          showPlayHeader()
+          const detail = (ev.distance != null && ev.roll != null)
+            ? ` (${ev.distance}-yd, d6 ${ev.roll})`
+            : ''
+          this.line(`    Field goal NO GOOD (${teamId(ev.player)}${detail})`)
           this.stats.fieldGoalsMissed++
           break
+        }
 
         case 'PAT_GOOD':
           this.line(`    PAT good — ${teamId(ev.player)} +1`)

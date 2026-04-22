@@ -47,14 +47,27 @@ export function resolveOffensiveTrickPlay(
       state.field.ballOn + rawGain > 99
         ? Math.trunc((100 - state.field.ballOn) / 2)
         : rawGain;
+    const newBallOn = Math.min(100, state.field.ballOn + gain);
     events.push({ type: "PENALTY", against: opponent(offense), yards: gain, lossOfDown: false });
+    // R-25: if the penalty GAIN carries the ball to or past the
+    // first-down marker, grant automatic first down — reset down to 1
+    // and firstDownAt to ballOn + 10. Otherwise keep the current down
+    // (same-down replays with yards-to-go updated).
+    const reachedFirstDown = newBallOn >= state.field.firstDownAt;
+    const nextDown = reachedFirstDown ? 1 : state.field.down;
+    const nextFirstDownAt = reachedFirstDown
+      ? Math.min(100, newBallOn + 10)
+      : state.field.firstDownAt;
+    if (reachedFirstDown) events.push({ type: "FIRST_DOWN" });
     return {
       state: {
         ...state,
         pendingPick: blankPick(),
         field: {
           ...state.field,
-          ballOn: Math.min(100, state.field.ballOn + gain),
+          ballOn: newBallOn,
+          down: nextDown,
+          firstDownAt: nextFirstDownAt,
         },
       },
       events,

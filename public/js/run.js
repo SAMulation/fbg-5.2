@@ -522,7 +522,17 @@ export default class Run {
       const plays = game.players[p].plays
       const pool = ['SR', 'LR', 'SP', 'LP', 'TP']
       const TARGET_WEIGHTS = { SR: 3, LR: 3, SP: 3, LP: 3, TP: 1 }
-      const weights = pool.map((a) => ((plays[a]?.count ?? 0) > 0 ? TARGET_WEIGHTS[a] : 0))
+      // F-47: when the offense is deep in their own territory (spot < 15),
+      // avoid the high-variance plays that tend to produce safeties
+      // (TP can lose big on negative rolls; LP had multiple observed
+      // -20+ swings deep in Game 2). Set those weights to 0 and rely
+      // on SR/SP/LR to climb out.
+      const deepInOwn = game.offNum === p && game.spot < 15
+      const weights = pool.map((a) => {
+        if ((plays[a]?.count ?? 0) <= 0) return 0
+        if (deepInOwn && (a === 'TP' || a === 'LP')) return 0
+        return TARGET_WEIGHTS[a]
+      })
       const totalWeight = weights.reduce((s, w) => s + w, 0)
       if (totalWeight === 0) {
         // Hand empty (shouldn't happen — refill triggers at 0); fall

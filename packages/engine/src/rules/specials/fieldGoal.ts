@@ -53,7 +53,7 @@ export function resolveFieldGoal(
   else make = true;
 
   if (make) {
-    events.push({ type: "FIELD_GOAL_GOOD", player: offense });
+    events.push({ type: "FIELD_GOAL_GOOD", player: offense, roll: die, distance });
     const newPlayers = {
       ...state.players,
       [offense]: { ...state.players[offense], score: state.players[offense].score + 3 },
@@ -69,7 +69,7 @@ export function resolveFieldGoal(
     };
   }
 
-  events.push({ type: "FIELD_GOAL_MISSED", player: offense });
+  events.push({ type: "FIELD_GOAL_MISSED", player: offense, roll: die, distance });
   events.push({ type: "TURNOVER", reason: "missed_fg" });
 
   // Possession flips at line of scrimmage (ball stays where kicked from).

@@ -115,7 +115,7 @@ function resolveRegularKick(
   const kickYards = 35 + 5 * (kickRoll - 1); // 35, 40, 45, 50, 55, 60 — 35..60
   const kickEndFromKicker = 35 + kickYards; // 70..95, bounded to 100
   const boundedEnd = Math.min(100, kickEndFromKicker);
-  events.push({ type: "KICKOFF", receivingPlayer: receiver, ballOn: boundedEnd });
+  events.push({ type: "KICKOFF", receivingPlayer: receiver, ballOn: boundedEnd, kickRoll, kickYards });
 
   // Receiver's starting ballOn (possession flipped).
   const receiverStart = 100 - boundedEnd; // 0..30
@@ -186,11 +186,13 @@ function resolveOnsideKick(
   const kickYards = 10 + tmp; // short kick 11..16 (or 11..22 vs OR)
   const kickEnd = 35 + kickYards;
 
-  events.push({ type: "KICKOFF", receivingPlayer: receiver, ballOn: kickEnd });
+  events.push({ type: "KICKOFF", receivingPlayer: receiver, ballOn: kickEnd, kickRoll: tmp, kickYards });
   events.push({
     type: "ONSIDE_KICK",
     recovered,
     recoveringPlayer: recovered ? kicker : receiver,
+    roll: tmp,
+    odds,
   });
 
   const returnRoll = rng.d6() + tmp; // v5.1: tmp + d6
@@ -259,7 +261,7 @@ function resolveSquibKick(
   const kickRoll = rng.d6();
   const kickYards = 15 + 5 * kickRoll; // 20..45
   const kickEnd = Math.min(100, 35 + kickYards);
-  events.push({ type: "KICKOFF", receivingPlayer: receiver, ballOn: kickEnd });
+  events.push({ type: "KICKOFF", receivingPlayer: receiver, ballOn: kickEnd, kickRoll, kickYards });
 
   // Only returnable if receiver chose RR; otherwise no return.
   const retYards = returnType === "RR" ? rng.d6() + rng.d6() : 0;

@@ -15,11 +15,27 @@ import type { KickType, PlayCall, PlayerId, ReturnType } from "./types.js";
 export type Event =
   | { type: "GAME_STARTED" }
   | { type: "COIN_TOSS_RESULT"; result: "heads" | "tails"; winner: PlayerId }
-  | { type: "KICKOFF"; receivingPlayer: PlayerId; ballOn: number }
+  | {
+      type: "KICKOFF";
+      receivingPlayer: PlayerId;
+      ballOn: number;
+      /** d6 roll used for kick distance (RK/SK only). Null for safety kicks. */
+      kickRoll?: number;
+      /** Yards the kick travelled. */
+      kickYards?: number;
+    }
   | { type: "KICK_TYPE_CHOSEN"; player: PlayerId; choice: KickType }
   | { type: "RETURN_TYPE_CHOSEN"; player: PlayerId; choice: ReturnType }
   | { type: "TOUCHBACK"; receivingPlayer: PlayerId }
-  | { type: "ONSIDE_KICK"; recovered: boolean; recoveringPlayer: PlayerId }
+  | {
+      type: "ONSIDE_KICK";
+      recovered: boolean;
+      recoveringPlayer: PlayerId;
+      /** intBetween(1, odds) roll used for recovery. */
+      roll?: number;
+      /** 6 normally, 12 if returner chose OR counter. */
+      odds?: number;
+    }
   | { type: "KICKOFF_RETURN"; returnerPlayer: PlayerId; yards: number }
   | { type: "PLAY_CALLED"; player: PlayerId; play: PlayCall }
   | {
@@ -36,8 +52,20 @@ export type Event =
   | { type: "TURNOVER_ON_DOWNS" }
   | { type: "TURNOVER"; reason: "interception" | "fumble" | "downs" | "missed_fg" }
   | { type: "TOUCHDOWN"; scoringPlayer: PlayerId }
-  | { type: "FIELD_GOAL_GOOD"; player: PlayerId }
-  | { type: "FIELD_GOAL_MISSED"; player: PlayerId }
+  | {
+      type: "FIELD_GOAL_GOOD";
+      player: PlayerId;
+      /** d6 roll used for the attempt (with any icing/etc modifiers already applied). */
+      roll?: number;
+      /** Attempted distance in yards. */
+      distance?: number;
+    }
+  | {
+      type: "FIELD_GOAL_MISSED";
+      player: PlayerId;
+      roll?: number;
+      distance?: number;
+    }
   | { type: "PAT_GOOD"; player: PlayerId }
   | { type: "TWO_POINT_GOOD"; player: PlayerId }
   | { type: "TWO_POINT_FAILED"; player: PlayerId }
