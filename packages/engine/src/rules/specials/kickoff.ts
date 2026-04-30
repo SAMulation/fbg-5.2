@@ -56,8 +56,14 @@ export function resolveKickoff(
       field: { ...state.field, ballOn: 35 },
     };
     const result = resolvePunt(kickingState, rng, { safetyKick: true });
+    // F-54: a return TD on the safety kick means resolvePunt set phase to
+    // PAT_CHOICE via applyTouchdown. Preserve scoring phases; only fall
+    // through to REG_PLAY when the kick produced a normal new possession.
+    const preserve = result.state.phase === "PAT_CHOICE" ||
+      result.state.phase === "TWO_PT_CONV";
+    const phase = preserve ? result.state.phase : "REG_PLAY";
     return {
-      state: { ...result.state, phase: "REG_PLAY", isSafetyKick: false },
+      state: { ...result.state, phase, isSafetyKick: false },
       events: result.events,
     };
   }

@@ -211,4 +211,25 @@ describe("Kickoff — safety-kick carve-out", () => {
     expect(r.state.phase).toBe("REG_PLAY");
     expect(r.events.some((e) => e.type === "PUNT")).toBe(true);
   });
+
+  it("F-54: safety-kick punt return TD preserves PAT_CHOICE phase", () => {
+    // Safety-kick path: block + muff checks skipped, so the rng draws are
+    // (coin, yardsCard, multCard, yardsCard).
+    // kickDist = 10 * yardsCard / 2 + (heads ? 20 : 0).
+    // yard=2 + heads → kickDist=30 → landing at 35+30=65 → receiverStart 35.
+    // Punt return mult: King=7 (RETURN_MULTIPLIERS in punt.ts).
+    // Return: King × yardsCard 10 = 70 → ballOn = 35 + 70 = 105 → TD.
+    const state: GameState = { ...s(), isSafetyKick: true };
+    const r = resolveKickoff(state, seqRng({
+      coins: ["heads"],
+      yardsCards: [2, 10],
+      multCards: [0], // King
+    }));
+    expect(r.events.some((e) => e.type === "TOUCHDOWN")).toBe(true);
+    expect(r.state.phase).toBe("PAT_CHOICE");
+    expect(r.state.isSafetyKick).toBe(false);
+    // Receiver (player 2 — the kickoff opponent) scored.
+    expect(r.state.players[2].score).toBe(6);
+    expect(r.state.field.offense).toBe(2);
+  });
 });
