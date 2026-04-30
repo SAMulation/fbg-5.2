@@ -72,16 +72,19 @@ export function resolveFieldGoal(
   events.push({ type: "FIELD_GOAL_MISSED", player: offense, roll: die, distance });
   events.push({ type: "TURNOVER", reason: "missed_fg" });
 
-  // Possession flips at line of scrimmage (ball stays where kicked from).
+  // F-51 fidelity: v5.1 places ball at SPOT OF KICK (7 yards behind LOS in
+  // offense POV → mirror + 7 in defender POV). Red-zone misses (kick spot
+  // would be inside defender's 20) snap forward to defender's 20.
   const defender = opp(offense);
-  const mirroredBallOn = 100 - state.field.ballOn;
+  const kickSpotInDefenderPov = 100 - state.field.ballOn + 7;
+  const newBallOn = kickSpotInDefenderPov <= 20 ? 20 : kickSpotInDefenderPov;
   return {
     state: {
       ...state,
       pendingPick: blankPick(),
       field: {
-        ballOn: mirroredBallOn,
-        firstDownAt: Math.min(100, mirroredBallOn + 10),
+        ballOn: newBallOn,
+        firstDownAt: Math.min(100, newBallOn + 10),
         down: 1,
         offense: defender,
       },

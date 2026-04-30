@@ -189,6 +189,32 @@ FootBored-specific) so audit outputs can reference them.
   _doPat can run. Fix: gameDriver._tickClock early-returns when
   state.phase is PAT_CHOICE or TWO_PT_CONV. Observed Game 6 (audit
   pass #1): CHI TD at Q4 0:00, score 0→6 (no PAT), game ended 7-6.
+- **F-50 (FIXED 2026-04-29) Defensive fumble return — direction.**
+  Big Play die=4–5 with defense beneficiary: the engine was treating
+  `returnYards` as added in old-offense POV (`ballOn + return` then
+  mirror), which physically pointed AWAY from defender's scoring
+  direction. v5.1's imperative path stored `dist` then called
+  `changePoss('to')` which mirrored the spot, then applied dist
+  forward in defender POV. Concrete: midfield fumble + 25-yd return
+  → engine put defense at their own 25 (75 yards from scoring); v5.1
+  put defense at offense's 25 (red zone). Fixed in
+  `bigPlay.ts:147-186` — defender starts at `100 - ballOn` and
+  advances `returnYards` toward their own goal in defender POV.
+  Tests: bigPlay.test.ts midfield-fumble + own-deep + red-zone cases.
+- **F-51 (FIXED 2026-04-29) Missed FG — spot of kick + 20-yard rule.**
+  Engine was placing defender at LOS mirror (`100 - ballOn`). v5.1
+  places ball at SPOT OF KICK (7 yds behind LOS in offense POV →
+  `100 - ballOn + 7` in defender POV), and snaps to defender's 20
+  whenever the kick spot would be inside their 20 (modern NFL
+  obscure-rule). Fixed in `fieldGoal.ts:75-93`. Tests: fieldGoal.test.ts
+  added "spot of kick" + "red-zone miss → 20" cases.
+- **F-52 (PRE-EXISTING FIX) Onside counter (OR) odds.** v5.1's
+  `kickDec` used `retType === 'RK'` to bump onside odds from 1-in-6
+  to 1-in-12, which was a typo (RK is a kicker pick, not a returner
+  pick), so OR did nothing in v5.1. The engine correctly uses
+  `returnType === "OR"` in `kickoff.ts:183`. Considered an
+  intentional fix-of-bug, not a fidelity bug. RULES.md should keep
+  reflecting the intended behavior, not the original typo.
 
 ### Phase transitions (these match what `validate.ts` enforces)
 - **F-26** INIT → COIN_TOSS (via START_GAME)

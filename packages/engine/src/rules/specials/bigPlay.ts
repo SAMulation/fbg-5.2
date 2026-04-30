@@ -150,10 +150,14 @@ function defensiveBigPlay(
 
   events.push({ type: "TURNOVER", reason: "fumble" });
 
-  // Defense becomes new offense. Ball position: offense gained returnYards,
-  // then flip perspective.
-  const projected = state.field.ballOn + returnYards;
-  if (projected >= 100) {
+  // F-50 fidelity: v5.1 stores `dist = returnYards` then calls changePoss('to'),
+  // which mirrors the ball to defender POV. The return is then applied
+  // forward in defender POV (`spot += dist`). Equivalent: defender starts at
+  // `100 - ballOn` (their own POV) and advances `returnYards` toward their goal.
+  const newOffenseStart = 100 - state.field.ballOn;
+  const finalBallOn = newOffenseStart + returnYards;
+
+  if (finalBallOn >= 100) {
     // Returned all the way — TD for defender.
     const newPlayers = {
       ...state.players,
@@ -171,19 +175,17 @@ function defensiveBigPlay(
       events,
     };
   }
-  if (projected <= 0) {
+  if (finalBallOn <= 0) {
     return applySafety(state, offense, events);
   }
 
-  // Flip possession, mirror ball position.
-  const mirroredBallOn = 100 - projected;
   return {
     state: {
       ...state,
       pendingPick: blankPick(),
       field: {
-        ballOn: mirroredBallOn,
-        firstDownAt: Math.min(100, mirroredBallOn + 10),
+        ballOn: finalBallOn,
+        firstDownAt: Math.min(100, finalBallOn + 10),
         down: 1,
         offense: defender,
       },

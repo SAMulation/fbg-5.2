@@ -65,11 +65,21 @@ describe("Field Goal", () => {
     expect(r.events.some((e) => e.type === "FIELD_GOAL_MISSED")).toBe(true);
   });
 
-  it("miss flips possession at mirror of the kick spot", () => {
+  it("miss flips possession at the spot of the kick (LOS mirror + 7)", () => {
+    // F-51: v5.1 places ball at spot of kick, which is 7 yds behind LOS in
+    // offense POV → 100 - 67 + 7 = 40 in defender POV.
     const r = resolveFieldGoal(s(67), rng(1));
     expect(r.state.field.offense).toBe(2);
-    expect(r.state.field.ballOn).toBe(33); // 100 - 67
+    expect(r.state.field.ballOn).toBe(40);
     expect(r.state.field.down).toBe(1);
+  });
+
+  it("red-zone miss (kick spot inside defender's 20) snaps to defender's 20", () => {
+    // F-51: v5.1 obscure-rule branch: (100 - 87) + 7 = 20 → take it at 20.
+    // ballOn=87 means kick distance = 100 - 87 + 17 = 30 (30-yd band, die<3 misses)
+    const r = resolveFieldGoal(s(87), rng(2));
+    expect(r.state.field.offense).toBe(2);
+    expect(r.state.field.ballOn).toBe(20);
   });
 
   it("make transitions to KICKOFF phase with +3 score", () => {

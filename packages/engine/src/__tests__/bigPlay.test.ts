@@ -88,9 +88,10 @@ describe("Big Play (defense beneficiary)", () => {
     const r = resolveBigPlay(s(50, 60, 2), 2, forcedRng(4));
     expect(r.events.some((e) => e.type === "TURNOVER")).toBe(true);
     expect(r.state.field.offense).toBe(2); // possession flipped
-    // Return = max(half-to-goal=25, 25) = 25. Projected offense-POV = 75.
-    // Flipped: 100 - 75 = 25.
-    expect(r.state.field.ballOn).toBe(25);
+    // F-50: defender starts at (100 - ballOn) = 50 in own POV, returns
+    // max(half=25, 25) = 25 forward → final ballOn = 75 (red-zone field
+    // position for the new offense).
+    expect(r.state.field.ballOn).toBe(75);
   });
 
   it("die 6 → defensive TD", () => {
@@ -103,13 +104,22 @@ describe("Big Play (defense beneficiary)", () => {
     expect(r.state.field.offense).toBe(2); // kicking team for PAT
   });
 
-  it("die 4-5 from offense's 10 → return passes the goal for defensive TD", () => {
-    // From offense's 10, return = max(half=45, 25) = 45 → projected 55, flipped 45.
-    // No defensive TD unless projected >= 100.
+  it("die 4-5 fumble in own deep territory → defensive TD return", () => {
+    // F-50: offense at own 10 fumbles. Defender starts at (100-10)=90 in own
+    // POV, returns max(half=45, 25) = 45. Final = 90 + 45 = 135 → TD for defender.
     const r = resolveBigPlay(s(10), 2, forcedRng(4));
+    const types = r.events.map((e) => e.type);
+    expect(types).toContain("TURNOVER");
+    expect(types).toContain("TOUCHDOWN");
+    expect(r.state.players[2].score).toBe(6);
+    expect(r.state.phase).toBe("PAT_CHOICE");
+  });
+
+  it("die 4-5 fumble from offense's red zone → defender pinned deep in own end", () => {
+    // F-50: offense at own 80 (deep red zone) fumbles. Defender starts at
+    // (100-80)=20, returns max(half=10, 25) = 25 → defender at 45 in own POV.
+    const r = resolveBigPlay(s(80), 2, forcedRng(4));
     expect(r.state.field.offense).toBe(2);
-    // half-to-goal from 10 = (100-10)/2 = 45; 45 > 25 so return = 45
-    // projected = 10 + 45 = 55; flipped = 45
     expect(r.state.field.ballOn).toBe(45);
   });
 });
