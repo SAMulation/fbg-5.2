@@ -154,28 +154,63 @@ async function main () {
     }
   }
 
+  // Statistical bands — assert distributions stay in plausible ranges so
+  // a regression in scoring/balance/turnover-rate fails the audit even
+  // when no single game throws an invariant. Bounds are loose initial
+  // guesses; tighten as we collect baseline data.
+  const BANDS = []
+  const outOfBand = []
   if (ok.length) {
+    const meanScore = mean([...scores1, ...scores2])
+    const meanTotal = mean(totalPts)
+    const passRush = mean(passYards) / Math.max(1, mean(rushYards))
+    const meanTurnovers = mean(turnovers)
+    const meanSacks = mean(sacks)
+    const shutouts = ok.filter(r => r.state.players[1].score === 0 || r.state.players[2].score === 0).length
+    const shutoutPct = 100 * shutouts / ok.length
+
+    BANDS.push(['mean per-team score', meanScore, 5, 40])
+    BANDS.push(['mean total / game', meanTotal, 12, 80])
+    BANDS.push(['pass:rush ratio', passRush, 0.5, 3.5])
+    BANDS.push(['turnovers / team-game', meanTurnovers, 0.1, 2.5])
+    BANDS.push(['sacks / team-game', meanSacks, 0.0, 2.0])
+    BANDS.push(['shutout pct', shutoutPct, 0, 50])
+
     console.log('')
     console.log('=== Score distribution ===')
-    console.log(`  Mean total / game:       ${mean(totalPts).toFixed(1)}`)
+    console.log(`  Mean total / game:       ${meanTotal.toFixed(1)}`)
     console.log(`  Median total / game:     ${median(totalPts)}`)
-    console.log(`  Mean per-team score:     ${mean([...scores1, ...scores2]).toFixed(1)}`)
-    const shutouts = ok.filter(r => r.state.players[1].score === 0 || r.state.players[2].score === 0).length
+    console.log(`  Mean per-team score:     ${meanScore.toFixed(1)}`)
     console.log(`  Shutouts:                ${shutouts} (${pct(shutouts, ok.length)})`)
 
     console.log('')
     console.log('=== Per-team stats (avg per game) ===')
     console.log(`  Pass yards:              ${mean(passYards).toFixed(1)}`)
     console.log(`  Rush yards:              ${mean(rushYards).toFixed(1)}`)
-    console.log(`  Pass:Rush ratio:         ${(mean(passYards) / Math.max(1, mean(rushYards))).toFixed(2)}`)
-    console.log(`  Turnovers:               ${mean(turnovers).toFixed(2)}`)
-    console.log(`  Sacks:                   ${mean(sacks).toFixed(2)}`)
+    console.log(`  Pass:Rush ratio:         ${passRush.toFixed(2)}`)
+    console.log(`  Turnovers:               ${meanTurnovers.toFixed(2)}`)
+    console.log(`  Sacks:                   ${meanSacks.toFixed(2)}`)
+
+    for (const [name, value, lo, hi] of BANDS) {
+      if (value < lo || value > hi) {
+        outOfBand.push(`${name} = ${value.toFixed(2)} outside [${lo}, ${hi}]`)
+      }
+    }
+
+    console.log('')
+    console.log('=== Statistical bands ===')
+    if (outOfBand.length === 0) {
+      console.log(`  All ${BANDS.length} bands in range.`)
+    } else {
+      for (const msg of outOfBand) console.log(`  OUT: ${msg}`)
+    }
   }
 
-  // Hard-fail loudly if any invariants tripped — `npm run audit` should
+  // Hard-fail loudly if any invariants tripped, any seed timed out, or
+  // any statistical band drifted out of range — `npm run audit` should
   // exit non-zero so CI can flag regressions.
-  if (flagged.length > 0 || failed.length > 0) {
-    console.error(`\n!!! ${flagged.length} flagged + ${failed.length} failed seed(s)`)
+  if (flagged.length > 0 || failed.length > 0 || outOfBand.length > 0) {
+    console.error(`\n!!! ${flagged.length} flagged + ${failed.length} failed seed(s) + ${outOfBand.length} band(s) out`)
     process.exit(1)
   }
 }
