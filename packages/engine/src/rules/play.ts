@@ -12,6 +12,7 @@ import type { GameState, PlayCall, RegularPlay } from "../types.js";
 import { drawMultiplier, drawYards } from "./deck.js";
 import { computeYardage } from "./yardage.js";
 import { opp } from "../state.js";
+import { bumpStats } from "./specials/shared.js";
 
 const REGULAR: ReadonlySet<PlayCall> = new Set(["SR", "LR", "SP", "LP"]);
 
@@ -65,10 +66,21 @@ export function resolveRegularPlay(
   // Decrement offense's hand for the play they used. Refill at zero — the
   // exact 12-card reshuffle behavior lives in `decrementHand`.
   const offense = state.field.offense;
-  const newPlayers = {
+  let newPlayers = {
     ...state.players,
     [offense]: decrementHand(state.players[offense], input.offensePlay),
   } as GameState["players"];
+
+  // Stats: pass vs run by play type. SP/LP carry passYards (with negative
+  // yardage on a pass = sack). SR/LR carry rushYards.
+  const isPass = input.offensePlay === "SP" || input.offensePlay === "LP";
+  const statDelta = isPass
+    ? {
+        passYards: outcome.yardsGained,
+        sacks: outcome.yardsGained < 0 ? 1 : 0,
+      }
+    : { rushYards: outcome.yardsGained };
+  newPlayers = bumpStats(newPlayers, offense, statDelta);
 
   // Apply yardage to ball position. Clamp at 100 (TD) and 0 (safety).
   const projected = state.field.ballOn + outcome.yardsGained;
@@ -125,6 +137,7 @@ export function resolveRegularPlay(
     possessionFlipped = true;
     events.push({ type: "TURNOVER_ON_DOWNS" });
     events.push({ type: "TURNOVER", reason: "downs" });
+    newPlayers = bumpStats(newPlayers, offense, { turnovers: 1 });
   } else {
     nextDown = (state.field.down + 1) as 1 | 2 | 3 | 4;
   }

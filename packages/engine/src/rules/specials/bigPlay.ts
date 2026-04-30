@@ -28,6 +28,7 @@ import {
   applySafety,
   applyTouchdown,
   blankPick,
+  bumpStats,
   type SpecialResolution,
 } from "./shared.js";
 
@@ -126,10 +127,11 @@ function defensiveBigPlay(
 
   if (die === 6) {
     // Defense scores the TD.
-    const newPlayers = {
+    let newPlayers = {
       ...state.players,
       [defender]: { ...state.players[defender], score: state.players[defender].score + 6 },
     } as GameState["players"];
+    newPlayers = bumpStats(newPlayers, offense, { turnovers: 1 });
     events.push({ type: "TURNOVER", reason: "fumble" });
     events.push({ type: "TOUCHDOWN", scoringPlayer: defender });
     return {
@@ -149,6 +151,7 @@ function defensiveBigPlay(
   const returnYards = halfToGoal > 25 ? halfToGoal : 25;
 
   events.push({ type: "TURNOVER", reason: "fumble" });
+  const playersAfterTurnover = bumpStats(state.players, offense, { turnovers: 1 });
 
   // F-50 fidelity: v5.1 stores `dist = returnYards` then calls changePoss('to'),
   // which mirrors the ball to defender POV. The return is then applied
@@ -159,15 +162,15 @@ function defensiveBigPlay(
 
   if (finalBallOn >= 100) {
     // Returned all the way — TD for defender.
-    const newPlayers = {
-      ...state.players,
-      [defender]: { ...state.players[defender], score: state.players[defender].score + 6 },
+    const playersWithScore = {
+      ...playersAfterTurnover,
+      [defender]: { ...playersAfterTurnover[defender], score: playersAfterTurnover[defender].score + 6 },
     } as GameState["players"];
     events.push({ type: "TOUCHDOWN", scoringPlayer: defender });
     return {
       state: {
         ...state,
-        players: newPlayers,
+        players: playersWithScore,
         pendingPick: blankPick(),
         phase: "PAT_CHOICE",
         field: { ...state.field, offense: defender },
@@ -176,12 +179,13 @@ function defensiveBigPlay(
     };
   }
   if (finalBallOn <= 0) {
-    return applySafety(state, offense, events);
+    return applySafety({ ...state, players: playersAfterTurnover }, offense, events);
   }
 
   return {
     state: {
       ...state,
+      players: playersAfterTurnover,
       pendingPick: blankPick(),
       field: {
         ballOn: finalBallOn,

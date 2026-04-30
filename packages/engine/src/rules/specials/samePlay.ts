@@ -26,6 +26,7 @@ import { resolveBigPlay } from "./bigPlay.js";
 import {
   applyYardageOutcome,
   blankPick,
+  bumpStats,
   type SpecialResolution,
 } from "./shared.js";
 
@@ -56,6 +57,7 @@ export function resolveSamePlay(state: GameState, rng: Rng): SpecialResolution {
       return {
         state: {
           ...stateAfterMult,
+          players: bumpStats(stateAfterMult.players, offense, { turnovers: 1 }),
           pendingPick: blankPick(),
           field: {
             ...stateAfterMult.field,

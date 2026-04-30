@@ -3,7 +3,7 @@
  */
 
 import type { Event } from "../../events.js";
-import type { GameState, PlayerId } from "../../types.js";
+import type { GameState, PlayerId, Stats } from "../../types.js";
 import { opp } from "../../state.js";
 
 export interface SpecialResolution {
@@ -13,6 +13,30 @@ export interface SpecialResolution {
 
 export function blankPick(): GameState["pendingPick"] {
   return { offensePlay: null, defensePlay: null };
+}
+
+/**
+ * Bump per-player stats. Returns a new players map with the deltas applied
+ * to `playerId`. Use partial Stats — unspecified fields are unchanged.
+ */
+export function bumpStats(
+  players: GameState["players"],
+  playerId: PlayerId,
+  deltas: Partial<Stats>,
+): GameState["players"] {
+  const cur = players[playerId].stats;
+  return {
+    ...players,
+    [playerId]: {
+      ...players[playerId],
+      stats: {
+        passYards: cur.passYards + (deltas.passYards ?? 0),
+        rushYards: cur.rushYards + (deltas.rushYards ?? 0),
+        turnovers: cur.turnovers + (deltas.turnovers ?? 0),
+        sacks: cur.sacks + (deltas.sacks ?? 0),
+      },
+    },
+  } as GameState["players"];
 }
 
 /**
