@@ -16,7 +16,7 @@
  */
 
 import { setupDomStub, installFastTimers, installSeededRandom, installFakeNow, realSetTimeout, realClearTimeout } from './dom-stub.mjs'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 
 setupDomStub()
 // Fast timers are safe here — local channel only, no fetch/WebSocket.
@@ -65,6 +65,23 @@ function connectionFor (pusher) {
   }
 }
 
+function dumpActionLog (channel, finalState, label) {
+  // Dump the LocalChannel's action log + setup + final state to a JSON
+  // file so the seed becomes a self-contained replay bundle.
+  if (!channel || !channel.actionLog || !channel.setup) return null
+  const dir = '/tmp/fbg-action-logs'
+  try { mkdirSync(dir, { recursive: true }) } catch {}
+  const path = `${dir}/${label}.json`
+  const bundle = {
+    seedBase: channel.seedBase,
+    setup: channel.setup,
+    actions: channel.actionLog,
+    finalState
+  }
+  writeFileSync(path, JSON.stringify(bundle))
+  return path
+}
+
 async function runOneGame (idx) {
   const [team1, team2] = MATCHUPS[idx % MATCHUPS.length]
   const pusher = createLocalPusher()
@@ -101,10 +118,13 @@ async function runOneGame (idx) {
     )
   })
 
+  const label = SEED !== null && !Number.isNaN(SEED) ? `seed-${SEED}-g${idx}` : `g${idx}`
+
   try {
     await Promise.race([driver.run_(), timeout])
     if (timeoutHandle) realClearTimeout(timeoutHandle)
     const state = driver.state
+    const logPath = dumpActionLog(channel, state, label)
     return {
       idx,
       ok: true,
@@ -112,10 +132,12 @@ async function runOneGame (idx) {
       stats: narrator.statsBlock(),
       invariants: invariants.report(),
       violationCount: invariants.violations.length,
-      finalState: state
+      finalState: state,
+      logPath
     }
   } catch (err) {
     if (timeoutHandle) realClearTimeout(timeoutHandle)
+    const logPath = dumpActionLog(channel, driver.state, label)
     return {
       idx,
       ok: false,
@@ -124,7 +146,8 @@ async function runOneGame (idx) {
       stats: narrator.statsBlock(),
       invariants: invariants.report(),
       violationCount: invariants.violations.length,
-      finalState: driver.state
+      finalState: driver.state,
+      logPath
     }
   }
 }

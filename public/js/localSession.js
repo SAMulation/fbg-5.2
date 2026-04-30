@@ -19,6 +19,11 @@ class LocalChannel {
     this.state = null
     this.seedBase = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0
     this.actionCount = 0
+    // Append-only log of (setup, actions[]) for deterministic replay.
+    // The harness can dump this to JSON on game end / on invariant
+    // violation so any seed becomes a self-contained reproduction bundle.
+    this.actionLog = []
+    this.setup = null
   }
 
   // ---- channel surface (matches onlineChannel) ----
@@ -45,10 +50,15 @@ class LocalChannel {
       this._broadcast({ state: this.state, events: [] })
       return
     }
-    const state = initialState({
-      team1: { id: String(setup.team1 ?? '?') },
-      team2: { id: String(setup.team2 ?? '?') },
+    this.setup = {
+      team1: String(setup.team1 ?? '?'),
+      team2: String(setup.team2 ?? '?'),
       quarterLengthMinutes: Number(setup.quarterLengthMinutes ?? 7)
+    }
+    const state = initialState({
+      team1: { id: this.setup.team1 },
+      team2: { id: this.setup.team2 },
+      quarterLengthMinutes: this.setup.quarterLengthMinutes
     })
     this.state = state
     this._broadcast({ state, events: [] })
@@ -60,6 +70,7 @@ class LocalChannel {
       return
     }
     fbgLog('session', 'dispatch', action.type, action)
+    this.actionLog.push(action)
     const rng = seededRng((this.seedBase + this.actionCount) >>> 0)
     this.actionCount++
     let result

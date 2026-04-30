@@ -16,6 +16,7 @@
  */
 
 import { setupDomStub, installFastTimers, installSeededRandom, installFakeNow, realSetTimeout, realClearTimeout } from './dom-stub.mjs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 
 setupDomStub()
 installFastTimers()
@@ -43,6 +44,20 @@ function connectionFor (pusher) {
     gamecode: 'LOCAL',
     pusher
   }
+}
+
+function dumpBundle (seed, channel, finalState) {
+  if (!channel || !channel.actionLog || !channel.setup) return null
+  const dir = '/tmp/fbg-action-logs'
+  try { mkdirSync(dir, { recursive: true }) } catch {}
+  const path = `${dir}/seed-${seed}.json`
+  writeFileSync(path, JSON.stringify({
+    seedBase: channel.seedBase,
+    setup: channel.setup,
+    actions: channel.actionLog,
+    finalState
+  }))
+  return path
 }
 
 async function runOneGame (seed, idx) {
@@ -83,15 +98,21 @@ async function runOneGame (seed, idx) {
   try {
     await Promise.race([driver.run_(), timeout])
     if (timeoutHandle) realClearTimeout(timeoutHandle)
-    return { seed, ok: true, state: lastState, violations: invariants.violations }
+    // Only dump bundle for flagged seeds (failed or violations) — saves
+    // disk on a clean N=200 run while still bundling every reproducer.
+    const flagged = invariants.violations.length > 0
+    const logPath = flagged ? dumpBundle(seed, channel, lastState) : null
+    return { seed, ok: true, state: lastState, violations: invariants.violations, logPath }
   } catch (err) {
     if (timeoutHandle) realClearTimeout(timeoutHandle)
+    const logPath = dumpBundle(seed, channel, lastState)
     return {
       seed,
       ok: false,
       err: err.message || String(err),
       state: lastState,
-      violations: invariants.violations
+      violations: invariants.violations,
+      logPath
     }
   }
 }
@@ -150,7 +171,8 @@ async function main () {
     console.log('  Flagged seeds (with violation kinds):')
     for (const r of flagged) {
       const kinds = [...new Set(r.violations.map(v => v.msg))]
-      console.log(`    SEED=${r.seed}: ${kinds.join('; ')}`)
+      const repro = r.logPath ? ` [bundle: ${r.logPath}]` : ''
+      console.log(`    SEED=${r.seed}: ${kinds.join('; ')}${repro}`)
     }
   }
 
