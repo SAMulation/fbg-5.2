@@ -11,7 +11,11 @@
     "dev": "npm run build:engine && cd packages/worker && npx wrangler dev",
     "dev:static": "node server-local.js",
     "deploy": "npm run build:engine && cd packages/worker && npx wrangler deploy",
-    "harness": "cd packages/harness && node run.mjs"
+    "harness": "cd packages/harness && node run.mjs",
+    "audit": "cd packages/harness && N=50 QTR=3 node driver-stats.mjs",
+    "audit:full": "cd packages/harness && N=200 QTR=7 node driver-stats.mjs",
+    "audit:smoke": "cd packages/harness && N=10 QTR=3 node driver-stats.mjs",
+    "replay": "cd packages/harness && node replay-game.mjs"
   },
   "repository": {
     "type": "git",

@@ -107,6 +107,62 @@ N=100 npm run harness | jq '[.games[].winner] | group_by(.) | map({winner: .[0],
 - **[run.mjs](run.mjs)** — CLI entry. Parses env vars, runs N games
   with `Promise.all`, emits the JSON summary.
 
+## Local CPU-vs-CPU drivers (no Worker required)
+
+Three additional drivers run entirely in-process against the local
+engine bundle — no Worker, no network. They share the LocalChannel
+session layer (`public/js/localSession.js`) so they exercise the same
+reducer the browser does.
+
+```bash
+# Single CPU vs CPU game with full play-by-play transcript
+N=1 QTR=7 node driver-narrative.mjs
+
+# N-seed statistical audit — fails non-zero on any invariant violation,
+# any timeout, or any band drift (mean score, pass:rush, turnovers, etc).
+npm run audit                # N=50 QTR=3 — quick regression check
+npm run audit:smoke          # N=10 QTR=3 — fastest sanity check
+npm run audit:full           # N=200 QTR=7 — overnight thorough
+```
+
+### Determinism — `SEED` env
+
+Both drivers honor `SEED=<int>` to make the run byte-deterministic:
+
+```bash
+SEED=42 N=1 QTR=3 node driver-narrative.mjs    # always the same game
+SEED=42 N=1 QTR=3 node driver-narrative.mjs    # diff exits 0
+```
+
+`installSeededRandom` replaces `Math.random` with Mulberry32 and
+`installFakeNow` pins `Date.now`, which together fully determinize the
+v5.1 CPU AI + LocalChannel's seedBase.
+
+### Action-log replay
+
+Every game (or every flagged seed in `audit`) dumps a self-contained
+JSON bundle to `/tmp/fbg-action-logs/`:
+
+```json
+{
+  "seedBase": 1700000000042,
+  "setup": { "team1": "SF", "team2": "CHI", "quarterLengthMinutes": 3 },
+  "actions": [{ "type": "START_GAME", ... }, ...],
+  "finalState": { "phase": "GAME_OVER", ... }
+}
+```
+
+Replay any bundle through the engine reducer directly (no driver, no AI):
+
+```bash
+npm run replay /tmp/fbg-action-logs/seed-7.json
+# → "replay OK — 73 actions, byte-equal final state"
+# or → "replay DIVERGED" with a per-key diff if engine semantics changed
+```
+
+This is what makes flagged seeds reproducible bugs: ship the JSON,
+replay reproduces exactly, fix the engine, replay byte-equal again.
+
 ## Known gaps
 
 - **2-point conversion picks**: `TWO_PT_CONV` phase runs the same
