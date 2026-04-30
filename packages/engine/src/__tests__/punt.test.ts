@@ -98,9 +98,14 @@ describe("Punt", () => {
         yardsCards: [4], // kick: 10*4/2 + 0 = 20 → lands at 50
       }),
     );
-    expect(r.events.some((e) => e.type === "TURNOVER" && e.reason === "fumble")).toBe(true);
+    // Muff is a recovery, not a turnover (kicker retains possession). The
+    // engine emits PUNT_MUFFED, not TURNOVER, so the previous-offense's
+    // turnover stat doesn't bump.
+    expect(r.events.some((e) => e.type === "PUNT_MUFFED")).toBe(true);
+    expect(r.events.some((e) => e.type === "TURNOVER")).toBe(false);
     expect(r.state.field.offense).toBe(1); // kicker retains
     expect(r.state.field.ballOn).toBe(50);
+    expect(r.state.players[1].stats.turnovers).toBe(0);
   });
 
   it("safety kick skips block and muff checks", () => {

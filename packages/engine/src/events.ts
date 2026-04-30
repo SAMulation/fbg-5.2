@@ -71,6 +71,7 @@ export type Event =
   | { type: "TWO_POINT_FAILED"; player: PlayerId }
   | { type: "SAFETY"; scoringPlayer: PlayerId }
   | { type: "PUNT"; player: PlayerId; landingSpot: number }
+  | { type: "PUNT_MUFFED"; recoveringPlayer: PlayerId }
   | { type: "TIMEOUT_CALLED"; player: PlayerId; remaining: number }
   | { type: "TWO_MINUTE_WARNING" }
   /**

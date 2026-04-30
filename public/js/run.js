@@ -442,9 +442,14 @@ export default class Run {
       else if (hm) dec = 'HM'
     }
 
-    // OT go-for-it (no punts in OT)
-    if (!dec && qtr > 4 && scoreBlock === 2 && dwn === 4) {
-      if (hm && fdn - spt > 10) dec = 'HM'
+    // OT go-for-it (no punts in OT). The engine rejects PUNT in OT_PLAY,
+    // so the cpuPlay default fallback below would deadlock the driver if
+    // we let the score-tied case through unhandled. Cover ALL scoreBlocks
+    // when in OT + 4th down: FG if in range, HM if hand allows + we need
+    // 10+, otherwise just go for it.
+    if (!dec && qtr > 4 && dwn === 4) {
+      if (spt >= 60) dec = 'FG'
+      else if (hm && fdn - spt > 10) dec = 'HM'
       else dec = 'GO'
     }
 

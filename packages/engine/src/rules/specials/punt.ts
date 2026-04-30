@@ -27,6 +27,7 @@ import {
   applySafety,
   applyTouchdown,
   blankPick,
+  bumpStats,
   type SpecialResolution,
 } from "./shared.js";
 
@@ -68,6 +69,7 @@ export function resolvePunt(
     return {
       state: {
         ...state,
+        players: bumpStats(state.players, offense, { turnovers: 1 }),
         pendingPick: blankPick(),
         field: {
           ballOn: mirroredBallOn,
@@ -101,8 +103,11 @@ export function resolvePunt(
 
   if (muffed) {
     // Receiver muffs, kicking team recovers where the ball landed.
-    // Kicking team retains possession (still offense).
-    events.push({ type: "TURNOVER", reason: "fumble" });
+    // Kicking team retains possession — possession does NOT change, so this
+    // is not a turnover for the previous offense (don't emit TURNOVER and
+    // don't bump turnover stats). The receiver's misplay is logged as a
+    // PUNT_MUFFED event so consumers can still surface it.
+    events.push({ type: "PUNT_MUFFED", recoveringPlayer: offense });
     return {
       state: {
         ...state,

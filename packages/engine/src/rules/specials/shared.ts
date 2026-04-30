@@ -119,10 +119,14 @@ export function applyYardageOutcome(
   }
 
   const mirroredBallOn = possessionFlipped ? 100 - projected : projected;
+  const players = possessionFlipped
+    ? bumpStats(state.players, offense, { turnovers: 1 })
+    : state.players;
 
   return {
     state: {
       ...state,
+      players,
       pendingPick: blankPick(),
       field: {
         ballOn: mirroredBallOn,
