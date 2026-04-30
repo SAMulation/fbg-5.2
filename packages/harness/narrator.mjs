@@ -370,7 +370,7 @@ export class Narrator {
 
   statsBlock () {
     const s = this.stats
-    return [
+    const lines = [
       '--- Stats ---',
       `Plays run:        ${s.plays}`,
       `First downs:      ${s.firstDowns}`,
@@ -385,6 +385,19 @@ export class Narrator {
       `Onside attempts:  ${s.onsideAttempts} (${s.onsideRecovered} recovered)`,
       `Touchbacks:       ${s.touchbacks}`,
       `Timeouts called:  ${s.timeoutsCalled}`
-    ].join('\n')
+    ]
+    // Per-team engine stats (passYards/rushYards/turnovers/sacks).
+    if (this.prevState) {
+      const t = (p) => this.prevState.players[p]
+      const fmt = (p) => {
+        const st = t(p).stats
+        return `  ${t(p).team.id}: ${st.passYards} pass, ${st.rushYards} rush, ` +
+          `${st.turnovers} TO, ${st.sacks} sack`
+      }
+      lines.push('Per-team:')
+      lines.push(fmt(1))
+      lines.push(fmt(2))
+    }
+    return lines.join('\n')
   }
 }

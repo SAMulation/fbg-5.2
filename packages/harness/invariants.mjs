@@ -85,6 +85,44 @@ export class InvariantChecker {
       }
     }
 
+    // Stat monotonicity (turnovers, sacks). Yardage stats can decrease on a
+    // sack or HM big-sack, so they're not monotonic — but counts are.
+    if (prev) {
+      for (const p of [1, 2]) {
+        for (const stat of ['turnovers', 'sacks']) {
+          if (state.players[p].stats[stat] < prev.players[p].stats[stat]) {
+            this.flag(`${stat} count decreased`, {
+              player: p,
+              was: prev.players[p].stats[stat],
+              now: state.players[p].stats[stat]
+            })
+          }
+        }
+      }
+    }
+
+    // Stat→event consistency: a TURNOVER event in this batch should bump
+    // the previous-offense's turnovers stat by exactly 1, EXCEPT for
+    // missed-FG and turnover-on-downs-via-resolveYardageOutcome paths
+    // (the FG/punt resolvers don't write stats yet).
+    if (prev) {
+      const turnoverEvents = events.filter(e =>
+        e.type === 'TURNOVER' && (e.reason === 'fumble' || e.reason === 'interception')
+      )
+      if (turnoverEvents.length > 0) {
+        const prevOffense = prev.field.offense
+        const tDelta = state.players[prevOffense].stats.turnovers -
+          prev.players[prevOffense].stats.turnovers
+        if (tDelta < 1) {
+          this.flag('TURNOVER event without stats bump', {
+            offense: prevOffense,
+            reasons: turnoverEvents.map(e => e.reason),
+            tDelta
+          })
+        }
+      }
+    }
+
     // Score delta matches events
     if (prev) {
       const deltas = {
