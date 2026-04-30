@@ -15,12 +15,21 @@
  *     that path) — rematch it if you want deterministic picks.
  */
 
-import { setupDomStub, installFastTimers, realSetTimeout, realClearTimeout } from './dom-stub.mjs'
+import { setupDomStub, installFastTimers, installSeededRandom, installFakeNow, realSetTimeout, realClearTimeout } from './dom-stub.mjs'
 import { writeFileSync } from 'node:fs'
 
 setupDomStub()
 // Fast timers are safe here — local channel only, no fetch/WebSocket.
 installFastTimers()
+// Determinism: when SEED is set, pin Math.random + Date.now so the entire
+// run (engine + CPU AI) is byte-reproducible. Without SEED, Math.random
+// stays native — useful for fuzz-style audits.
+const SEED = process.env.SEED ? parseInt(process.env.SEED, 10) : null
+if (SEED !== null && !Number.isNaN(SEED)) {
+  installSeededRandom(SEED)
+  installFakeNow()
+  console.error(`[harness] deterministic mode: SEED=${SEED}`)
+}
 
 const { default: Game } = await import('../../public/js/game.js')
 const { GameDriver } = await import('../../public/js/gameDriver.js')
@@ -124,6 +133,9 @@ async function main () {
   const pieces = []
   pieces.push('=========================================================')
   pieces.push(`FBG narrative harness — N=${N} quarters=${QTR}min CPU vs CPU`)
+  if (SEED !== null && !Number.isNaN(SEED)) {
+    pieces.push(`SEED=${SEED} (deterministic — same SEED + same args = byte-equal output)`)
+  }
   pieces.push('=========================================================\n')
 
   for (let i = 0; i < N; i++) {

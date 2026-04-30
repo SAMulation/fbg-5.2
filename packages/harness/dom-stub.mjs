@@ -139,6 +139,32 @@ export function installFastTimers (minMs = 50, maxMs = 3100) {
   }
 }
 
+/**
+ * Replace `Math.random` with a Mulberry32 PRNG seeded by `seed`. Used by
+ * the harness so v5.1's CPU AI (which still calls Math.random for play
+ * weighting, coin calls, and onside picks) becomes deterministic
+ * alongside the engine's seeded reducer.
+ */
+export function installSeededRandom (seed) {
+  let state = (seed >>> 0) || 1
+  globalThis.Math.random = () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = state
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/**
+ * Pin Date.now to a fixed value. localSession.js seeds its rng base from
+ * `Date.now() ^ Math.floor(Math.random() * 0xffffffff)` — once both are
+ * deterministic, the entire engine + harness becomes reproducible.
+ */
+export function installFakeNow (fixed = 1700000000000) {
+  globalThis.Date.now = () => fixed
+}
+
 export function setupDomStub () {
   const documentElement = makeElement('html')
   // documentElement.style needs setProperty for run.prepareHTML
