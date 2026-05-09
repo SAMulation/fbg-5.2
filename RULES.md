@@ -122,12 +122,14 @@ FootBored-specific) so audit outputs can reference them.
 - **F-13 Die = 4:** fixed ×+4 multiplier, draw yards card.
 - **F-14 Die = 5:** Big Play for the caller.
 - **F-15 Die = 6:** forced LR with +5 bonus.
-- **F-15a OPEN QUESTION: defensive TP sign convention.** When defense
-  calls TP and rolls die=4, current engine gives **offense +4×yards**
-  (offense gains, defense loses their gamble). Alt interpretation:
-  defense wins their gamble on die=4 and offense loses 4×yards.
-  Observed example: Game 3 line 18-23, SF defense calls TP, rolls 4,
-  CHI offense gains +32 for a TD. Needs verification against v5.1.
+- **F-15a (VERIFIED 2026-05-08) defensive TP sign convention.** When
+  defense calls TP and rolls die=4, current engine gives **offense
+  +4×yards** (offense gains, defense loses their gamble). Verified
+  against v5.1: `trickPlay.ts:187-211` matches the v5.1 imperative
+  path — same fixed multipliers as offensive TP, with the inversion
+  implicit in defense being the caller. The Game 3 line 18-23
+  observation (SF defense calls TP, rolls 4, CHI gains +32 for TD)
+  is the intended behavior, not a bug.
 
 ### Big Play (when triggered by TP die=5 or SAME_PLAY_COIN King)
 - **F-16 Offensive Big Play:** die 1-3 → +25 yd; die 4-5 → max(half-to-goal, 40); die 6 → TD.
@@ -153,42 +155,64 @@ FootBored-specific) so audit outputs can reference them.
   with retry-on-TP. The engine already tracks the hand in
   `state.players[p].hand`; CPU should draw from it with exhaustion +
   refill semantics like a real hand.
-- **F-41 CPU should call timeouts to preserve clock.** The trailing
-  team in the final 2 minutes of a half with TOs remaining should
-  call at least one to stop the clock. Current AI never calls TO.
+- **F-41 (FIXED 2026-05-08) CPU should call timeouts to preserve clock.**
+  Both offense and defense return 'TO' from `cpuPages` when trailing in
+  the final 2:00 of Q2/Q4 with TOs remaining. Fixed in `run.js:503-520`,
+  with a `currentTime > 0` guard — calling TO at exactly 0:00 sets
+  `_timeoutsThisPlay > 0` which makes `_tickClock(0)` fire after the
+  zero-second play, the period never closes, and the game loops.
+
+  Side discovery while debugging F-41: **`cpuPlay` was picking FG on
+  non-4th downs at end-of-half**, which the engine rejected via
+  `validate.ts:77` (`"not 4th down"`). Rejected actions return empty
+  events, so the driver's `_drainUntilResolved` hung waiting for a
+  terminal event that never arrived (SEED=10 reproduced this). Engine
+  permits FG only on 4th down — FBG quirk vs. real football where FG
+  is legal any down. Patched `run.js:425-428` and `441-443` to gate FG
+  picks on `dwn === 4`. AI now falls through to HM / regular play on
+  earlier downs at end-of-half.
+
+  Verified: SEED=1, 10, 42 all clean; `audit:smoke` 10/10 with no
+  timeouts and all 6 stat bands in range.
 - **F-42 (DEPRIORITIZED) TP die=3/4 matchupQuality sentinel.** Narrator
   shows "[Worst]" for TP die 3/4 even though the fixed multiplier is
   what determines the outcome. User: "doesn't matter that it's
   [Worst]" since the ±3/+4 multiplier is the actual mechanic. Cosmetic.
-- **F-44 Narrator: FG events need play header.** `FIELD_GOAL_GOOD` and
-  `FIELD_GOAL_MISSED` cases in `narrator.mjs` don't call
-  `showPlayHeader()`, so a FG attempt shows up without "4th & X @ spot"
-  context. Add the call.
-- **F-45 Narrator: Hail Mary rendering is wrong.** HM `PLAY_RESOLVED`
-  events carry placeholder mult/yards values (`10 (0×) × 0 = -10 yd`)
-  that don't reflect HM mechanics. Narrator should skip the "Cards:"
-  line for HM plays and just show the HM roll + resulting yardage.
-- **F-46 Narrator: 4th-down special at start of quarter.** When a FG
-  or PUNT happens as the first event of a new quarter (because the
-  prior 3rd down resolved and quarter ticked), the play header is
-  missing. Same root cause as F-44.
-- **F-47 CPU AI: avoid high-variance plays deep in own territory.**
-  Game 2 saw two safeties, both from CHI calling TP/LP with ballOn < 15
-  and taking 20+ yard losses into the endzone. AI should down-weight
-  TP / LP when ballOn < 15.
-- **F-48 Narrator: SAME_PLAY_COIN with 0-yard outcome is invisible.**
-  Same-play paths that resolve to 0 yards (Jack+heads, 10+tails)
-  emit only SAME_PLAY_COIN, no PLAY_RESOLVED, so the transcript shows
-  "Same-play coin flip: tails" with the down silently advancing.
-  Either the engine should emit a PLAY_RESOLVED with yardsGained=0
-  on those paths, or the narrator should fall back to "no gain"
-  rendering when only the coin event is present.
-- **F-49 Driver bug: zero-second TD skips PAT.** When a TD is scored
-  on the zero-second play (clock=0), the driver dispatches
-  TICK_CLOCK(30) which fires QUARTER_ENDED → GAME_OVER before
-  _doPat can run. Fix: gameDriver._tickClock early-returns when
-  state.phase is PAT_CHOICE or TWO_PT_CONV. Observed Game 6 (audit
-  pass #1): CHI TD at Q4 0:00, score 0→6 (no PAT), game ended 7-6.
+- **F-44 (FIXED 2026-05-08) Narrator: FG events need play header.**
+  `FIELD_GOAL_GOOD` / `FIELD_GOAL_MISSED` handlers in `narrator.mjs:222,232`
+  now call `showPlayHeader()`. Verified on SEED=42: `[Q4 2:30 | SF 0,
+  CHI 0 | TO: 3-3] CHI 4th & 1 @ SF 7 / *** FIELD GOAL GOOD — CHI ***`.
+- **F-45 (FIXED 2026-05-08) Narrator: Hail Mary rendering is wrong.**
+  HM `PLAY_RESOLVED` carries placeholder mult/yards (`10 (0×) × 0`)
+  that don't reflect HM mechanics. Fixed in `narrator.mjs:181-200` —
+  for `ev.offensePlay === 'HM'`, suppress the Cards line and emit just
+  `→ {±N} yd → ball @ M`. The HAIL_MARY_ROLL handler already shows the
+  roll above. Verified on SEED=1.
+- **F-46 (FIXED 2026-05-08) Narrator: 4th-down special at start of
+  quarter.** Same root cause as F-44. Fixed by the same showPlayHeader
+  calls in FIELD_GOAL_GOOD / FIELD_GOAL_MISSED / PUNT handlers
+  (`narrator.mjs:211, 222, 232`).
+- **F-47 (FIXED 2026-05-08) CPU AI: avoid high-variance plays deep in
+  own territory.** Game 2 saw two safeties, both from CHI calling TP/LP
+  with ballOn < 15 and taking 20+ yard losses into the endzone. Fixed
+  in `run.js:530-540` — when `game.offNum === p && game.spot < 15`,
+  TP and LP weights set to 0 so the offense draws SR/LR/SP only.
+- **F-48 (FIXED 2026-04-22) Narrator: SAME_PLAY_COIN with 0-yard outcome
+  is invisible.** Same-play paths that resolved to 0 yards (Jack+heads,
+  10+tails) emitted only SAME_PLAY_COIN, no PLAY_RESOLVED, so the
+  transcript showed "Same-play coin flip: tails" with the down silently
+  advancing. Fixed in `samePlay.ts` — multiplier=0 branches now push a
+  PLAY_RESOLVED event with yardsGained=0 before applyYardageOutcome.
+  Commit `65e880a`.
+- **F-49 (FIXED 2026-05-08) Driver bug: zero-second TD skips PAT.**
+  When a TD is scored on the zero-second play (clock=0), the driver
+  was dispatching TICK_CLOCK(30) which fired QUARTER_ENDED → GAME_OVER
+  before _doPat could run. Observed Game 6 (audit pass #1): CHI TD at
+  Q4 0:00, score 0→6 (no PAT), game ended 7-6. Fixed in
+  `gameDriver.js:619-624` — `_tickClock` early-returns when
+  `state.phase === 'PAT_CHOICE' || state.phase === 'TWO_PT_CONV'`. Let
+  the PAT/2pt resolve first; the next regular play's tick closes the
+  quarter.
 - **F-50 (FIXED 2026-04-29) Defensive fumble return — direction.**
   Big Play die=4–5 with defense beneficiary: the engine was treating
   `returnYards` as added in old-offense POV (`ballOn + return` then
