@@ -186,9 +186,18 @@ export class Narrator {
           this.line(
             `    ${snapOffense ? teamId(snapOffense) : '?'} call: ${offName} vs ${defName} [${matchup}]`
           )
-          this.line(
-            `    Cards: ${ev.multiplier.card} (${ev.multiplier.value}×) × ${ev.yardsCard} = ${ev.yardsGained >= 0 ? '+' : ''}${ev.yardsGained} yd → ball @ ${ev.newBallOn}`
-          )
+          // F-45: HM plays carry placeholder mult/yards (10 (0×) × 0). The
+          // HAIL_MARY_ROLL handler already showed the roll; here we just
+          // emit the yardage outcome rather than the misleading Cards line.
+          if (ev.offensePlay === 'HM') {
+            this.line(
+              `    → ${ev.yardsGained >= 0 ? '+' : ''}${ev.yardsGained} yd → ball @ ${ev.newBallOn}`
+            )
+          } else {
+            this.line(
+              `    Cards: ${ev.multiplier.card} (${ev.multiplier.value}×) × ${ev.yardsCard} = ${ev.yardsGained >= 0 ? '+' : ''}${ev.yardsGained} yd → ball @ ${ev.newBallOn}`
+            )
+          }
           this.stats.plays++
           break
         }

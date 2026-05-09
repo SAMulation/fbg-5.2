@@ -422,8 +422,11 @@ export default class Run {
       else scoreBlock = 4 // Down 2+ TDs
     }
 
-    // Half over, kick a FG if in range
-    if (spt >= 60 && ((timeBlock === 1 && qtr === 2) || (scoreBlock === 0 && timeBlock === 1 && qtr === 4))) {
+    // Half over, kick a FG if in range. Engine's FOURTH_DOWN_CHOICE
+    // action requires 4th down, so on earlier downs we let the AI fall
+    // through to HM / regular play below — kicking on 1st/2nd/3rd is
+    // legal in real football but the engine doesn't model it.
+    if (dwn === 4 && spt >= 60 && ((timeBlock === 1 && qtr === 2) || (scoreBlock === 0 && timeBlock === 1 && qtr === 4))) {
       dec = 'FG'
     }
 
@@ -436,9 +439,10 @@ export default class Run {
       dec = 'HM'
     }
 
-    // Final possession and down a FG
+    // Final possession and down a FG. FG only on 4th down — same engine
+    // restriction as the end-of-half rule above.
     if (!dec && timeBlock === 1 && scoreBlock === 1) {
-      if (spt >= 60) dec = 'FG'
+      if (dwn === 4 && spt >= 60) dec = 'FG'
       else if (hm) dec = 'HM'
     }
 
@@ -500,16 +504,21 @@ export default class Run {
       await this.cpuPlay(game, p)
       if (game.players[p].currentPlay) return game.players[p].currentPlay
 
-      // R-19 — Defense-side clock management: in the final 2 minutes of
-      // Q2 or Q4, if we're trailing and have timeouts left, call one to
-      // stop the clock. Once per play max (keyed on currentTime to
-      // avoid re-calling on the driver's re-prompt after TO dispatch).
-      const onDefense = game.defNum === p
+      // R-19 / F-41 — Trailing-team clock management: in the final 2
+      // minutes of Q2 or Q4, if we're trailing and have timeouts left,
+      // call one to stop the clock. Applies on offense and defense.
+      // Skip at currentTime===0: the zero-second play has no clock to
+      // preserve, and a TO there sets `_timeoutsThisPlay`, which makes
+      // `_tickClock(0)` fire instead of `_tickClock(30)` — the period
+      // doesn't advance and the zero-second play loops. Once per play
+      // max (keyed on currentTime to avoid re-calling on the driver's
+      // re-prompt after TO dispatch).
       const trailing = game.players[game.opp(p)].score > game.players[p].score
-      const lateHalf = (game.qtr === 2 || game.qtr === 4) && game.currentTime <= 2.0
+      const lateHalf = (game.qtr === 2 || game.qtr === 4) &&
+                       game.currentTime > 0 && game.currentTime <= 2.0
       const hasTimeouts = game.players[p].timeouts > 0
       const alreadyThisPlay = game.players[p]._toCalledAtClock === game.currentTime
-      if (onDefense && trailing && lateHalf && hasTimeouts && !alreadyThisPlay) {
+      if (trailing && lateHalf && hasTimeouts && !alreadyThisPlay) {
         game.players[p]._toCalledAtClock = game.currentTime
         return 'TO'
       }

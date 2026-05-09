@@ -165,11 +165,10 @@ replay reproduces exactly, fix the engine, replay byte-equal again.
 
 ## Known gaps
 
-- **2-point conversion picks**: `TWO_PT_CONV` phase runs the same
-  PICK_PLAY flow, but the engine's reducer doesn't yet route
-  `TWO_PT_CONV` picks through `resolveTwoPointConversion`. Games that
-  land in that phase may not score the 2pt correctly. Same gap the
-  browser client has; fix lives in the engine reducer.
+- **WS-protocol harness CPU**: the bots in `strategies.mjs` (used by
+  `npm run harness` / `HeadlessClient`) don't call `CALL_TIMEOUT`. The
+  in-process drivers (`driver-narrative`, `driver-stats`, `driver-local`,
+  `driver-online`) load `public/js/run.js` via the DOM stub and so do
+  exercise R-19's defense-side TO-calling.
 - **Clock**: host ticks 30 seconds per play. Real games might use
   different durations (penalty + timeout clock rules aren't modeled).
-- **Timeouts**: no bot calls `CALL_TIMEOUT`.
