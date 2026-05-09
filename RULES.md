@@ -178,6 +178,20 @@ FootBored-specific) so audit outputs can reference them.
   shows "[Worst]" for TP die 3/4 even though the fixed multiplier is
   what determines the outcome. User: "doesn't matter that it's
   [Worst]" since the ±3/+4 multiplier is the actual mechanic. Cosmetic.
+- **F-43 (FIXED 2026-05-08) CPU hand-exhaustion fallback hangs driver.**
+  When `cpuPages` weighted draw produced totalWeight=0 (e.g. SR/LR/SP
+  all at hand=0 and F-47's deep-in-own filter zeroing TP/LP at
+  `spot < 15`), the fallback returned 'SR' regardless of whether
+  count>0. Engine's PICK_PLAY reducer silently no-ops `play=SR` when
+  hand[SR] === 0 (`reducer.ts:158-163`); the driver's
+  `_drainUntilResolved` then hung waiting for a PLAY_CALLED that never
+  came. Reproducible at SEED=44 (CHI hand `{SR:0, LR:0, SP:0, LP:1,
+  TP:1, HM:3}` at Q3 0:00 spot=13). This was the actual OT-/end-of-
+  period-tail timeout pattern flagged in `project_ot_timeout_tail.md`.
+  Fixed in `run.js:543-565`: tiered fallback — drop F-47 deep-filter
+  if it zeroed everything; else HM if available; else first regular
+  play with count>0; else 'SR' as last-resort. `audit` N=50 / QTR=3
+  goes from 49/50 to 50/50 with all stat bands in range.
 - **F-44 (FIXED 2026-05-08) Narrator: FG events need play header.**
   `FIELD_GOAL_GOOD` / `FIELD_GOAL_MISSED` handlers in `narrator.mjs:222,232`
   now call `showPlayHeader()`. Verified on SEED=42: `[Q4 2:30 | SF 0,

@@ -542,15 +542,31 @@ export default class Run {
       // -20+ swings deep in Game 2). Set those weights to 0 and rely
       // on SR/SP/LR to climb out.
       const deepInOwn = game.offNum === p && game.spot < 15
-      const weights = pool.map((a) => {
+      const buildWeights = (allowDeep) => pool.map((a) => {
         if ((plays[a]?.count ?? 0) <= 0) return 0
-        if (deepInOwn && (a === 'TP' || a === 'LP')) return 0
+        if (allowDeep === false && deepInOwn && (a === 'TP' || a === 'LP')) return 0
         return TARGET_WEIGHTS[a]
       })
-      const totalWeight = weights.reduce((s, w) => s + w, 0)
+      let weights = buildWeights(false)
+      let totalWeight = weights.reduce((s, w) => s + w, 0)
+      if (totalWeight === 0 && deepInOwn) {
+        // F-47 filter exhausted the pool because SR/LR/SP are all 0.
+        // Drop the filter rather than return an unplayable card — the
+        // engine silently rejects PICK_PLAY for hand=0 plays and the
+        // driver's drain loop hangs waiting for events that never come.
+        weights = buildWeights(true)
+        totalWeight = weights.reduce((s, w) => s + w, 0)
+      }
       if (totalWeight === 0) {
-        // Hand empty (shouldn't happen — refill triggers at 0); fall
-        // back to SR rather than stalling the driver.
+        // No regular plays left in hand at all. Use HM if available
+        // (period must be ending if we're here); else any non-zero card.
+        if ((game.players[p].hm ?? 0) > 0) return 'HM'
+        // Last-resort: pick any pool entry with count > 0. If literally
+        // every count is 0, hand-refill is broken — fall through to SR
+        // (engine will reject and the driver should refill on next turn).
+        for (const a of pool) {
+          if ((plays[a]?.count ?? 0) > 0) return a
+        }
         return 'SR'
       }
       let pick = Math.random() * totalWeight
