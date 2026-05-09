@@ -12,3 +12,8 @@ packages/engine/dist/
 # Wrangler local state
 packages/worker/.wrangler/
 .claude/
+
+# Playwright artifacts
+/test-results/
+/playwright-report/
+/playwright/.cache/

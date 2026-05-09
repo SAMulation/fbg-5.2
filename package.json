@@ -15,7 +15,8 @@
     "audit": "cd packages/harness && N=50 QTR=3 node driver-stats.mjs",
     "audit:full": "cd packages/harness && N=200 QTR=7 node driver-stats.mjs",
     "audit:smoke": "cd packages/harness && N=10 QTR=3 node driver-stats.mjs",
-    "replay": "cd packages/harness && node replay-game.mjs"
+    "replay": "cd packages/harness && node replay-game.mjs",
+    "e2e": "playwright test"
   },
   "repository": {
     "type": "git",
@@ -29,6 +30,7 @@
   "homepage": "https://github.com/SAMulation/fbg-5.1#readme",
   "devDependencies": {
     "@babel/preset-env": "^7.19.1",
+    "@playwright/test": "^1.59.1",
     "jest": "^29.0.3",
     "netlify-lambda": "^2.0.15",
     "standard": "^17.0.0"
