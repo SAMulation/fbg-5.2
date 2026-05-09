@@ -692,7 +692,9 @@ export default class Run {
   printPoss (game, scoreboard) {
     const clockPoss = scoreboard.querySelector('.clock-poss')
     clockPoss.classList.toggle('fade', false)
-    clockPoss.classList.toggle('poss-home', game.away !== game.offNum)
+    // poss-home rotates the half-disc indicator 180deg so it points to
+    // the home side of the scoreboard. Set it when home is on offense.
+    clockPoss.classList.toggle('poss-home', game.home === game.offNum)
   }
 
   printName (game, scoreboard) {
@@ -829,7 +831,11 @@ export default class Run {
     await animationWaitForCompletion(nameEl, 'just-scored', false)
     await alertBox(this, game.players[scrNo].team.name + ' ' + msg2)
 
-    game.players[scrNo].score += pts
+    // The engine has already updated state.players[scrNo].score and
+    // _applyStateToGame synced game.players[scrNo].score from it before
+    // we got here. The legacy `+= pts` line double-counted scores
+    // (showed 12 after a 6-pt TD, 8 after a 1-pt PAT, etc.) — was
+    // masked until showBoard started repainting on every state apply.
     this.printScore(game, this.scoreboardContainer)
 
     await animationWaitForCompletion(scoreEl, 'just-scored', false)
