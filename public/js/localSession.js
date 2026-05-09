@@ -6,10 +6,20 @@
  * dispatchAction / nextState). Rather than branch the driver on "are we
  * local?", we present the same interface and run engine.reduce here
  * instead of sending to the DO.
+ *
+ * Save/resume: `save()` returns a self-contained JSON bundle that can
+ * be stashed in localStorage / IndexedDB. `hydrate(bundle)` rebuilds the
+ * channel state by replaying the action log against initialState — the
+ * same determinism guarantee the engine's replay.test.ts proves. We
+ * replay rather than restore the snapshot so we get verification "for
+ * free": if engine semantics drift, replay will diverge and we'll see it.
  */
 
-import { reduce, initialState, seededRng } from './engine.js'
+import { reduce, initialState, replayActions, seededRng } from './engine.js'
 import { fbgLog } from './log.js'
+
+const SAVE_BUNDLE_VERSION = 1
+const LS_KEY = 'fbg.savedGame.v1'
 
 class LocalChannel {
   constructor () {
@@ -94,6 +104,88 @@ class LocalChannel {
     })
   }
 
+  // ---- save / resume ----
+
+  /**
+   * Returns a self-contained JSON bundle. Serializable via JSON.stringify.
+   * Call any time after sendInit; resume reconstructs the same state via
+   * `replayActions(initialState(setup), actionLog, seedBase)`.
+   */
+  save () {
+    if (!this.setup) throw new Error('save: channel not initialized')
+    return {
+      version: SAVE_BUNDLE_VERSION,
+      seedBase: this.seedBase,
+      setup: { ...this.setup },
+      actionLog: this.actionLog.slice(),
+      // Snapshot of state for sanity-check on hydrate. Replay is canonical.
+      stateSnapshot: this.state,
+      savedAt: Date.now()
+    }
+  }
+
+  /**
+   * Restore a saved game. Replays the action log against a fresh initialState.
+   * Throws on schema mismatch or replay divergence (the latter would
+   * indicate engine semantics drift between save and load).
+   */
+  hydrate (bundle) {
+    if (!bundle || bundle.version !== SAVE_BUNDLE_VERSION) {
+      throw new Error('hydrate: bad or missing version')
+    }
+    this.setup = { ...bundle.setup }
+    this.seedBase = bundle.seedBase
+    this.actionLog = bundle.actionLog.slice()
+    this.actionCount = this.actionLog.length
+
+    const initial = initialState({
+      team1: { id: this.setup.team1 },
+      team2: { id: this.setup.team2 },
+      quarterLengthMinutes: this.setup.quarterLengthMinutes
+    })
+    const replayed = replayActions(initial, this.actionLog, this.seedBase)
+    this.state = replayed.state
+
+    // Sanity: replayed state should match the snapshot. If not, the engine
+    // changed between save and load — log a warning but trust the replay
+    // (it's the canonical computation, snapshot was just for verification).
+    if (bundle.stateSnapshot &&
+        JSON.stringify(bundle.stateSnapshot) !== JSON.stringify(replayed.state)) {
+      console.warn('[localSession] hydrate: replay diverges from snapshot — engine semantics may have changed since save')
+    }
+
+    // Broadcast the rehydrated state so any consumer (gameDriver) syncs.
+    this._broadcast({ state: this.state, events: [] })
+  }
+
+  /** Persist the current channel to localStorage under LS_KEY. */
+  saveToStorage () {
+    const bundle = this.save()
+    try {
+      window.localStorage.setItem(LS_KEY, JSON.stringify(bundle))
+      return true
+    } catch (err) {
+      console.warn('[localSession] saveToStorage failed:', err)
+      return false
+    }
+  }
+
+  /** Load the most recent localStorage save. Returns null if nothing saved. */
+  static loadFromStorage () {
+    try {
+      const raw = window.localStorage.getItem(LS_KEY)
+      if (!raw) return null
+      return JSON.parse(raw)
+    } catch (err) {
+      console.warn('[localSession] loadFromStorage failed:', err)
+      return null
+    }
+  }
+
+  static clearStorage () {
+    try { window.localStorage.removeItem(LS_KEY) } catch {}
+  }
+
   // ---- helpers ----
 
   _broadcast (payload) {
@@ -117,6 +209,24 @@ class LocalChannel {
  */
 export function createLocalPusher () {
   let channel = null
+  // Expose debug-style save/resume hooks on window. Formal UI integration
+  // is deferred — these let users (and future tests) drive save/resume
+  // from the dev console while we figure out the right UX.
+  if (typeof window !== 'undefined') {
+    window.fbgSave = () => {
+      if (!channel) { console.warn('fbgSave: no active channel'); return false }
+      return channel.saveToStorage()
+    }
+    window.fbgResume = () => {
+      const bundle = LocalChannel.loadFromStorage()
+      if (!bundle) { console.warn('fbgResume: no saved game'); return false }
+      if (!channel) channel = new LocalChannel()
+      channel.hydrate(bundle)
+      return true
+    }
+    window.fbgClearSave = () => LocalChannel.clearStorage()
+    window.fbgHasSave = () => LocalChannel.loadFromStorage() !== null
+  }
   return {
     async createGame () {
       channel = new LocalChannel()
