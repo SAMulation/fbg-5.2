@@ -25,7 +25,7 @@ export type {
   TeamRef,
 } from "./types.js";
 
-export { reduce, reduceMany, type ReduceResult } from "./reducer.js";
+export { reduce, reduceMany, replayActions, type ReduceResult } from "./reducer.js";
 export {
   initialState,
   opp,

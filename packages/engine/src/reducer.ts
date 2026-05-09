@@ -19,7 +19,7 @@ import type { Action } from "./actions.js";
 import type { Event } from "./events.js";
 import type { GameState, KickType, ReturnType } from "./types.js";
 import { validateAction } from "./validate.js";
-import type { Rng } from "./rng.js";
+import { seededRng, type Rng } from "./rng.js";
 import { isRegularPlay, resolveRegularPlay } from "./rules/play.js";
 import {
   resolveDefensiveTrickPlay,
@@ -547,4 +547,38 @@ export function reduceMany(
     events.push(...result.events);
   }
   return { state: current, events };
+}
+
+/**
+ * Replay an action log using the same per-action seed construction the
+ * DO uses (`seededRng((seed + i) >>> 0)`), so the resulting state is
+ * byte-identical to what the DO produces in real-time. Used for:
+ *   - server-side state-replay verification on DO load (catches drift)
+ *   - client-side rejoin reconstruction (verify DO's snapshot is honest)
+ *   - bug-report replay from action-log bundles
+ *
+ * `initial` is the GameState the action log was applied to — typically
+ * `initialState({ team1, team2, quarterLengthMinutes })`. Caller is
+ * responsible for ensuring `initial` matches the original starting point.
+ */
+export function replayActions(
+  initial: GameState,
+  actions: Action[],
+  seed: number,
+): ReduceResult {
+  let current = initial;
+  const events: Event[] = [];
+  for (let i = 0; i < actions.length; i++) {
+    const rng = seededRngFor(seed, i);
+    const result = reduce(current, actions[i]!, rng);
+    current = result.state;
+    events.push(...result.events);
+  }
+  return { state: current, events };
+}
+
+function seededRngFor(seed: number, idx: number): Rng {
+  // Mirrors `game-room.ts:197`: each action consumes a fresh seeded RNG
+  // derived from (base seed + action index) >>> 0.
+  return seededRng((seed + idx) >>> 0);
 }

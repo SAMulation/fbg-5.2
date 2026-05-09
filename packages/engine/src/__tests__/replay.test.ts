@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { reduce } from "../reducer.js";
+import { reduce, replayActions } from "../reducer.js";
 import { initialState } from "../state.js";
 import { seededRng } from "../rng.js";
 import type { Action } from "../actions.js";
@@ -84,6 +84,43 @@ describe("determinism — replay from (seed, actions)", () => {
       JSON.stringify(a.finalState) !== JSON.stringify(b.finalState) ||
       (coinA && coinB && JSON.stringify(coinA) !== JSON.stringify(coinB));
     expect(anyDivergence).toBe(true);
+  });
+});
+
+describe("replayActions — server-rehydration helper", () => {
+  it("reconstructs the same final state as run()", () => {
+    const seed = 12345;
+    const ground = run(seed, SHORT_GAME);
+    const initial = initialState({
+      team1: { id: "NE" },
+      team2: { id: "GB" },
+      quarterLengthMinutes: 7,
+    });
+    const replayed = replayActions(initial, SHORT_GAME, seed);
+    expect(replayed.state).toEqual(ground.finalState);
+  });
+
+  it("flattens the event stream identically to run()", () => {
+    const seed = 99;
+    const ground = run(seed, SHORT_GAME);
+    const initial = initialState({
+      team1: { id: "NE" },
+      team2: { id: "GB" },
+      quarterLengthMinutes: 7,
+    });
+    const replayed = replayActions(initial, SHORT_GAME, seed);
+    expect(replayed.events).toEqual(ground.eventLog.flat());
+  });
+
+  it("empty action log returns initial unchanged", () => {
+    const initial = initialState({
+      team1: { id: "NE" },
+      team2: { id: "GB" },
+      quarterLengthMinutes: 7,
+    });
+    const replayed = replayActions(initial, [], 0);
+    expect(replayed.state).toBe(initial);
+    expect(replayed.events).toEqual([]);
   });
 });
 

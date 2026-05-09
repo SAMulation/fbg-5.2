@@ -27,6 +27,7 @@
 import {
   reduce,
   initialState,
+  replayActions,
   seededRng,
   type Action,
   type Event as GameEvent,
@@ -64,7 +65,30 @@ export class GameRoom implements DurableObject {
 
     state.blockConcurrencyWhile(async () => {
       const stored = await state.storage.get<PersistedGame>("game");
-      if (stored) this.game = stored;
+      if (stored) {
+        this.game = stored;
+        // Defensive: replay the action log against initialState and warn
+        // if the result diverges from the stored state. Catches engine
+        // version drift between deploys, storage corruption, or replay
+        // determinism regressions. Not fatal — we trust stored state and
+        // continue, but the log is a flag for an oncall.
+        try {
+          const initial = initialState({
+            team1: stored.state.players[1].team,
+            team2: stored.state.players[2].team,
+            quarterLengthMinutes: stored.state.clock.quarterLengthMinutes,
+          });
+          const replayed = replayActions(initial, stored.actions, stored.seed);
+          if (JSON.stringify(replayed.state) !== JSON.stringify(stored.state)) {
+            console.warn(
+              "[GameRoom] replay verification: stored state diverges from " +
+                `(seed=${stored.seed}, actions.length=${stored.actions.length})`
+            );
+          }
+        } catch (err) {
+          console.warn("[GameRoom] replay verification threw:", err);
+        }
+      }
       this.gameLoaded = true;
     });
   }
