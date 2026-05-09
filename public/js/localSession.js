@@ -234,6 +234,10 @@ export function createLocalPusher () {
     },
     subscribe () {
       if (!channel) channel = new LocalChannel()
+      // Expose for debug + multi-game-viewer iframe parents that need to
+      // inspect actionLog / state without poking through internal pusher
+      // shape. Not relied on by gameDriver itself.
+      if (typeof window !== 'undefined') window.__fbgChannel = channel
       setTimeout(() => {
         const handlers = channel.handlers.get('pusher:subscription_succeeded')
         if (handlers) for (const cb of handlers) try { cb({}) } catch {}
