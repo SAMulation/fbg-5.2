@@ -61,7 +61,8 @@ export class Narrator {
       onsideAttempts: 0,
       onsideRecovered: 0,
       touchbacks: 0,
-      timeoutsCalled: 0
+      timeoutsCalled: 0,
+      penalties: 0
     }
   }
 
@@ -309,11 +310,17 @@ export class Narrator {
           break
         }
 
+        case 'PENALTY': {
+          const lod = ev.lossOfDown ? ', loss of down' : ''
+          this.line(`    → Penalty on ${teamId(ev.against)} (${ev.yards} yds${lod})`)
+          this.stats.penalties = (this.stats.penalties || 0) + 1
+          break
+        }
+
         // Silent events — kept out of the transcript but could be added for
         // deeper debugging.
         case 'CLOCK_TICKED':
         case 'DECK_SHUFFLED':
-        case 'PENALTY':
           break
 
         default:
@@ -393,7 +400,8 @@ export class Narrator {
       `Kickoffs:         ${s.kickoffs}`,
       `Onside attempts:  ${s.onsideAttempts} (${s.onsideRecovered} recovered)`,
       `Touchbacks:       ${s.touchbacks}`,
-      `Timeouts called:  ${s.timeoutsCalled}`
+      `Timeouts called:  ${s.timeoutsCalled}`,
+      `Penalties:        ${s.penalties}`
     ]
     // Per-team engine stats (passYards/rushYards/turnovers/sacks).
     if (this.prevState) {

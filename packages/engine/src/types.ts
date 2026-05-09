@@ -24,9 +24,39 @@ export type GamePhase =
   | "TWO_MIN_WARNING"
   | "TWO_PT_CONV"
   | "PAT_CHOICE"
+  | "PENALTY_CHOICE"
   | "OT_START"
   | "OT_PLAY"
   | "GAME_OVER";
+
+/**
+ * A penalty awaiting accept/decline. Captured by resolvers when a penalty
+ * occurs and the affected team has a meaningful choice. The reducer
+ * applies the penalty on ACCEPT_PENALTY and reverts to `preState` on
+ * DECLINE_PENALTY. `beneficiary` is the player whose decision matters
+ * (penalty is *against* the other side — beneficiary gains yards on accept).
+ */
+export interface PenaltyDescriptor {
+  /** Team the penalty is against. */
+  against: PlayerId;
+  /** Yards gained by the beneficiary on accept. */
+  yards: number;
+  /** If true, the penalised team also loses the down on accept. */
+  lossOfDown: boolean;
+  /** Player making the decision. */
+  beneficiary: PlayerId;
+  /**
+   * Snapshot of the field state before the penalty was generated, so that
+   * a DECLINE can revert to the play's natural outcome (or a replay-down).
+   */
+  preState: {
+    ballOn: number;
+    firstDownAt: number;
+    down: 1 | 2 | 3 | 4;
+  };
+  /** Origin tag for narration / logging (e.g. "TP_DIE_2", "BP_OFF_PEN"). */
+  source: string;
+}
 
 export interface Hand {
   /** Counts of regular play cards remaining in the current 12-card cycle. */
@@ -112,6 +142,13 @@ export interface GameState {
   openingReceiver: PlayerId | null;
   overtime: OvertimeState | null;
   pendingPick: PendingPick;
+  /**
+   * A penalty awaiting accept/decline, or null. Populated when a resolver
+   * generates a penalty and the affected team gets a choice. Cleared on
+   * ACCEPT_PENALTY / DECLINE_PENALTY. Most current penalties (TP die=2,
+   * BP die=1-3) auto-apply without a choice and don't populate this.
+   */
+  pendingPenalty: PenaltyDescriptor | null;
   /**
    * Append-only log of recent significant events for the recap pane.
    * Engine produces, consumer trims as needed.

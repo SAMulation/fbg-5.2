@@ -147,6 +147,21 @@ describe("validateAction — payload shape", () => {
   });
 });
 
+describe("validateAction — penalty choice gating", () => {
+  it("rejects ACCEPT_PENALTY outside PENALTY_CHOICE", () => {
+    expect(
+      validateAction(fresh("REG_PLAY"), { type: "ACCEPT_PENALTY", player: 1 }),
+    ).toBe("not in PENALTY_CHOICE");
+  });
+
+  it("rejects DECLINE_PENALTY when no pendingPenalty", () => {
+    const s = fresh("PENALTY_CHOICE");
+    expect(
+      validateAction(s, { type: "DECLINE_PENALTY", player: 1 }),
+    ).toBe("no pending penalty");
+  });
+});
+
 describe("reduce — silently drops invalid actions", () => {
   it("state unchanged when validation fails", () => {
     const s = fresh("REG_PLAY");

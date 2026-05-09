@@ -288,12 +288,88 @@ function reduceCore(state: GameState, action: Action, rng: Rng): ReduceResult {
       };
     }
 
-    case "ACCEPT_PENALTY":
-    case "DECLINE_PENALTY":
-      // Penalties are captured as events at resolution time, but accept/decline
-      // flow requires state not yet modeled (pending penalty). TODO when
-      // penalty mechanics are ported from run.js.
-      return { state, events: [] };
+    case "ACCEPT_PENALTY": {
+      const pp = state.pendingPenalty;
+      if (!pp) return { state, events: [] };
+      // Apply yards: beneficiary advances toward their goal. Yards are
+      // capped at half-distance-to-goal when the raw yards would push
+      // past the opposing goal line. Direction is in the beneficiary's
+      // POV — but ballOn is always in the offense's POV, so we have
+      // to translate when the beneficiary is the defense.
+      const offense = state.field.offense;
+      const isOffenseBeneficiary = pp.beneficiary === offense;
+      const preBallOn = pp.preState.ballOn;
+      // Half-to-goal cap for the beneficiary side. In offense POV: if
+      // offense benefits, cap so newBallOn <= 99; if defense benefits,
+      // newBallOn would mirror to 100 - (their goal line) on accept.
+      const rawYards = pp.yards;
+      const yards = isOffenseBeneficiary
+        ? preBallOn + rawYards > 99
+          ? Math.trunc((100 - preBallOn) / 2)
+          : rawYards
+        : preBallOn - rawYards < 1
+          ? Math.trunc(preBallOn / 2)
+          : rawYards;
+      const newBallOn = isOffenseBeneficiary
+        ? Math.min(100, preBallOn + yards)
+        : Math.max(0, preBallOn - yards);
+      // R-25: penalty crosses first-down marker → automatic first down.
+      // R-26: penalty on offense doesn't reset first-down marker.
+      let nextDown: 1 | 2 | 3 | 4 = pp.preState.down;
+      let nextFirstDownAt = pp.preState.firstDownAt;
+      const events: Event[] = [];
+      if (isOffenseBeneficiary) {
+        const reachedFirstDown = newBallOn >= pp.preState.firstDownAt;
+        if (reachedFirstDown) {
+          nextDown = 1;
+          nextFirstDownAt = Math.min(100, newBallOn + 10);
+          events.push({ type: "FIRST_DOWN" });
+        }
+      }
+      // Loss-of-down: advance the down (or trigger turnover-on-downs at 4).
+      if (pp.lossOfDown) {
+        if (nextDown >= 4) {
+          // Turnover-on-downs: handled out-of-band; for now just advance.
+          nextDown = 4;
+        } else {
+          nextDown = (nextDown + 1) as 1 | 2 | 3 | 4;
+        }
+      }
+      // Phase returns to whichever play phase we came from. Default to
+      // OT_PLAY if the game is in overtime; else REG_PLAY.
+      const nextPhase: GameState["phase"] = state.overtime ? "OT_PLAY" : "REG_PLAY";
+      return {
+        state: {
+          ...state,
+          phase: nextPhase,
+          pendingPenalty: null,
+          field: {
+            ...state.field,
+            ballOn: newBallOn,
+            down: nextDown,
+            firstDownAt: nextFirstDownAt,
+          },
+        },
+        events,
+      };
+    }
+
+    case "DECLINE_PENALTY": {
+      // Decline = take the play's natural outcome, which means leaving
+      // the current state.field as-is (the resolver applied the play
+      // outcome BEFORE flagging the penalty for choice). The pendingPenalty
+      // descriptor's preState is for ACCEPT only — DECLINE doesn't revert.
+      if (!state.pendingPenalty) return { state, events: [] };
+      const nextPhase: GameState["phase"] = state.overtime ? "OT_PLAY" : "REG_PLAY";
+      return {
+        state: {
+          ...state,
+          phase: nextPhase,
+          pendingPenalty: null,
+        },
+        events: [],
+      };
+    }
 
     case "PAT_CHOICE": {
       const scorer = state.field.offense;

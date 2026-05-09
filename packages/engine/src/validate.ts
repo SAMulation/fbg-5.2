@@ -63,7 +63,10 @@ export function validateAction(state: GameState, action: Action): string | null 
 
     case "ACCEPT_PENALTY":
     case "DECLINE_PENALTY":
+      if (state.phase !== "PENALTY_CHOICE") return "not in PENALTY_CHOICE";
       if (!isPlayer(action.player)) return "bad player";
+      if (!state.pendingPenalty) return "no pending penalty";
+      if (action.player !== state.pendingPenalty.beneficiary) return "wrong player for choice";
       return null;
 
     case "PAT_CHOICE":

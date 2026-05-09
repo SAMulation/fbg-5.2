@@ -74,6 +74,7 @@ export function initialState(args: InitialStateArgs): GameState {
     openingReceiver: null,
     overtime: null,
     pendingPick: { offensePlay: null, defensePlay: null },
+    pendingPenalty: null,
     lastPlayDescription: "Start of game",
     isSafetyKick: false,
   };
