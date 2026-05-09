@@ -1,13 +1,20 @@
 /* global alert */
 
+// Fast-mode toggle: when window.fbgFast is true, sleeps return immediately
+// and animation-completion waits resolve on the next microtask. Used by
+// `?fast=1` and the multi-game viewer page so 60-play CPU-vs-CPU games
+// finish in seconds instead of minutes. The flag is read at runtime so
+// you can flip it from the dev console mid-game.
+const isFast = () => typeof window !== 'undefined' && window.fbgFast === true
+
 // Display alert messages somewhere cool (or in alert or in console)
 export const alertBox = async (run, msg) => {
   // This is the preferred route
   if (run.alert === 'bar') {
     run.alertMessage.innerText = msg
-    await sleep(run.game.animation ? 750 : 100)
+    await sleep(isFast() ? 0 : (run.game.animation ? 750 : 100))
   } else if (run.alert === 'alert') {
-    alert(msg)
+    if (!isFast()) alert(msg)
   } else {
     console.log(msg)
   }
@@ -18,6 +25,7 @@ export const alertBox = async (run, msg) => {
 
 // Helper function to 'sleep' between messages
 export const sleep = async (ms) => {
+  if (isFast()) return new Promise(resolve => resolve())
   return new Promise(resolve => {
     setTimeout(resolve, ms)
   })
@@ -64,6 +72,12 @@ export const animationWaitForCompletion = async (el, cls, on = true) => {
   // Resolve immediately in that case.
   const has = el.classList.contains(cls)
   if ((on && has) || (!on && !has)) return
+
+  // Fast mode: toggle the class but don't wait for any transition.
+  if (isFast()) {
+    animationSimple(el, cls, on)
+    return new Promise(resolve => resolve())
+  }
 
   return new Promise(resolve => {
     let done = false

@@ -37,6 +37,15 @@ const pusherFor = (t) => (isOnlineType(t) ? onlinePusher : localPusher)
 //   })
 // })
 
+// `?fast=1` short-circuits all sleeps + animation waits in graphics.js.
+// Used by the multi-game viewer (multi.html) and the cpu-vs-cpu E2E
+// smoke so 60-play games finish in seconds. Set BEFORE Site/Game/etc.
+// construct so any module that reads window.fbgFast on init sees the
+// right value.
+if (typeof window !== 'undefined' && new URLSearchParams(location.search).get('fast') === '1') {
+  window.fbgFast = true
+}
+
 // FIX: REMOVE LATER - Set to window for easy access
 const site = new Site(document.querySelector('.main-container'))
 const resumeSelection = document.querySelector('.resume-button')

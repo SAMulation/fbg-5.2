@@ -12,19 +12,18 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"]],
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:4040",
     trace: "retain-on-failure",
     headless: true,
-    // Block third-party trackers (cookiebot, plausible, jotform, pusher)
-    // so specs aren't flaky when those domains are unreachable.
     extraHTTPHeaders: {},
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: "node server-local.js",
-    url: "http://localhost:3000",
+    // FBG on :4040 to avoid colliding with the user's other dev server on :3000.
+    command: "PORT=4040 node server-local.js",
+    url: "http://localhost:4040",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },
