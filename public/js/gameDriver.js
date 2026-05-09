@@ -754,12 +754,6 @@ export class GameDriver {
     if (state.openingReceiver) game.recFirst = state.openingReceiver
     game.away = game.opp(game.home)
 
-    // Re-render the scoreboard on every state apply — clock, score,
-    // down/distance, spot, quarter all live in `showBoard`. Without this
-    // call the scoreboard is only painted at game setup and after kickoff /
-    // OT-start, so during a regular drive the on-screen clock / down / spot
-    // freeze even though `game.*` is updated correctly. Guard against an
-    // INIT-phase apply running before prepareHTML has built the scoreboard.
     if (this.run?.scoreboardContainer && game.players?.[1]?.team?.abrv) {
       try {
         this.run.showBoard(game, this.run.scoreboardContainer)

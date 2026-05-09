@@ -96,12 +96,29 @@ export default class ButtonInput extends BaseInput {
   getButtonInput (game, p) {
     // Cache the DOM element that will store play and timeout buttons
     // const buttonArea = document.querySelector('.selection.pl' + p)
-    const buttonArea = document.querySelector('.cards-container .cards')
+    let buttonArea = document.querySelector('.cards-container .cards')
     const timeout = document.querySelector('.to-butt')
 
-    // Clear buttonArea and timeout
-    buttonArea.innerText = ''
-    timeout.innerText = ''
+    // Defensive: if `.cards` got detached (we've seen this on the TO
+    // re-prompt path on mobile), recreate it inside the cards-container
+    // so the rest of this function can populate buttons normally.
+    if (!buttonArea) {
+      const container = document.querySelector('.cards-container')
+      if (container) {
+        buttonArea = document.createElement('div')
+        buttonArea.className = 'cards'
+        container.appendChild(buttonArea)
+        if (game.run) game.run.actualCards = buttonArea
+      } else {
+        return
+      }
+    }
+
+    // Clear buttonArea and timeout. Use replaceChildren to actually remove
+    // child element nodes — innerText='' is unreliable across engines.
+    buttonArea.replaceChildren()
+    if (timeout) timeout.innerText = ''
+    if (!timeout) return
 
     // Loop through legalChoices and add buttons
     for (let i = 0; i < this.legalChoices.length; i++) {
@@ -177,12 +194,20 @@ export default class ButtonInput extends BaseInput {
     }
     buttons.forEach(button => {
       button.addEventListener('click', event => {
-        const play = event.target.getAttribute('data-playType')
+        // event.target may be the button OR a child element (img/p/svg).
+        // Walk up to the actual <button class="card"> so we read the
+        // play attribute reliably.
+        const cardBtn = event.target.closest('button.card') || button
+        const play = cardBtn.getAttribute('data-playType')
         fbgLog('input', 'picked', play, 'for p=' + p)
         timeout.removeEventListener('click', onTimeoutClick)
         resolve(play)
-        game.run.alertMessage.disabled = true
-        event.target.parentElement.innerHTML = ''
+        if (game.run?.alertMessage) game.run.alertMessage.disabled = true
+        // Clear all card buttons by clearing the cards container — guard
+        // against detached buttons (parentElement can be null on rare
+        // races in the TO re-prompt flow on mobile).
+        const cardsContainer = cardBtn.parentElement || document.querySelector('.cards-container .cards')
+        if (cardsContainer) cardsContainer.replaceChildren()
         timeout.disabled = true
       })
     })
